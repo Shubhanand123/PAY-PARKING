@@ -1,0 +1,353 @@
+// Parking engine. In milestone 1 this runs in the browser and saves to localStorage, standing in
+// for the server. Every rule lives here so it can move to Supabase (Postgres functions) unchanged.
+// Money is always integer paise. Times are stored as UTC epoch ms and shown in Asia/Kolkata.
+
+export type Role = 'attendant' | 'owner'
+export type Staff = { id: string; name: string; role: Role; gate: string }
+export type Category = { id: string; name: string; icon: string; active: boolean }
+
+/** One price rule per vehicle type, inside a tariff version. */
+export type Rate = {
+  firstHours: number      // first slab length in hours, e.g. 2
+  firstPaise: number      // price for the first slab, e.g. 3000 = ₹30
+  perHourPaise: number    // each started hour after the slab
+  capPaise: number        // max per 24 hours (0 = no cap)
+}
+export type TariffVersion = {
+  id: string; version: number; createdAt: number; createdBy: string; note: string
+  graceMin: number
+  rates: Record<string, Rate> // by category id
+}
+export type Settings = {
+  siteName: string; operator: string; address: string; phone: string
+  payAtEntry: boolean
+  cancelNeedsReason: boolean
+  capacity: number
+}
+export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
+export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash'; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
+export type Ticket = {
+  id: string            // human ticket number, e.g. T-000123
+  token: string         // opaque QR token
+  plate: string         // normalized, e.g. MH12AB1234
+  category: string
+  site: string
+  entryGate: string; entryBy: string; entryAt: number
+  tariffId: string
+  prepaidHours: number  // 0 if not pay-at-entry
+  status: Status
+  exitGate?: string; exitBy?: string; exitAt?: number
+  billedAt?: number     // time the exit bill was locked
+  totalPaise?: number   // full charge for the stay
+  cancelledBy?: string; cancelledAt?: number; cancelReason?: string
+  prints: number
+  rev: number           // bumps on every change; stale writes are refused
+}
+export type AuditKind = 'entry' | 'print' | 'reprint' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login'
+export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticketId?: string; text: string; amountPaise?: number }
+
+export type DB = {
+  seq: number
+  staff: Staff[]
+  categories: Category[]
+  tariffs: TariffVersion[]
+  settings: Settings
+  tickets: Ticket[]
+  payments: Payment[]
+  audit: Audit[]
+}
+
+const KEY = 'parking-demo-v1'
+const HOUR = 3600_000, MIN = 60_000
+
+// ---------- money and time ----------
+export const rupees = (p: number) => '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: p % 100 ? 2 : 0, maximumFractionDigits: 2 })
+const IST = 'Asia/Kolkata'
+export const fmtTime = (t: number) => new Date(t).toLocaleTimeString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true })
+export const fmtDate = (t: number) => new Date(t).toLocaleDateString('en-IN', { timeZone: IST, day: 'numeric', month: 'short', year: 'numeric' })
+export const fmtDT = (t: number) => `${fmtDate(t)}, ${fmtTime(t)}`
+export const istDay = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: IST }) // YYYY-MM-DD
+export const istHour = (t: number) => Number(new Date(t).toLocaleString('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }))
+export function dur(ms: number) {
+  const m = Math.max(0, Math.round(ms / MIN)); const h = Math.floor(m / 60)
+  return h ? `${h}h ${m % 60}m` : `${m}m`
+}
+
+// ---------- Indian registration plates ----------
+// Normalized form: uppercase letters and digits only. We never reject a plate for its shape; we only warn.
+// Patterns checked (from MoRTH / CMVR conventions):
+//  standard  SS RR X(XX) NNNN   e.g. MH12AB1234, DL3CAB1234, KA01A1234
+//  Bharat    YY BH NNNN X(X)    e.g. 22BH1234AA  (Bharat series, MoRTH notification Aug 2021)
+//  temporary T MMYY SS NNNN XX  e.g. T0124MH1234AB (format varies by state, so only a light check)
+export const STATES = 'AN AP AR AS BR CH CG DD DL GA GJ HR HP JK JH KA KL LA LD MP MH MN ML MZ NL OD PY PB RJ SK TN TS TR UP UK WB'.split(' ')
+export function normPlate(s: string) { return s.toUpperCase().replace(/[^A-Z0-9]/g, '') }
+export type PlateCheck = { kind: 'standard' | 'bharat' | 'temporary' | 'unknown'; pretty: string; hint?: string; suggestion?: string }
+export function checkPlate(raw: string): PlateCheck {
+  const p = normPlate(raw)
+  let m = p.match(/^([A-Z]{2})(\d{1,2})([A-Z]{0,3})(\d{1,4})$/)
+  if (m && STATES.includes(m[1])) return { kind: 'standard', pretty: [m[1], m[2], m[3], m[4]].filter(Boolean).join(' ') }
+  m = p.match(/^(\d{2})BH(\d{4})([A-Z]{1,2})$/)
+  if (m) return { kind: 'bharat', pretty: `${m[1]} BH ${m[2]} ${m[3]}` }
+  if (/^T\d{4}[A-Z]{2}\d{1,4}[A-Z]{0,2}$/.test(p)) return { kind: 'temporary', pretty: p }
+  // Try fixing common OCR mix-ups: letters in the state/series part, digits in number parts.
+  const fixed = fixOcr(p)
+  if (fixed !== p && checkPlate(fixed).kind !== 'unknown') return { kind: 'unknown', pretty: p, hint: 'Looks unusual. Did you mean this?', suggestion: fixed }
+  return { kind: 'unknown', pretty: p, hint: p.length < 6 ? 'Too short for a registration number.' : 'Unusual format. Check it, then confirm.' }
+}
+function fixOcr(p: string) {
+  const toL: Record<string, string> = { '0': 'O', '1': 'I', '5': 'S', '8': 'B', '2': 'Z' }
+  const toD: Record<string, string> = { O: '0', I: '1', S: '5', B: '8', Z: '2', D: '0', Q: '0' }
+  if (p.length < 6) return p
+  const a = p.split('')
+  for (let i = 0; i < 2; i++) a[i] = toL[a[i]] ?? a[i]
+  for (let i = 2; i < 4; i++) a[i] = toD[a[i]] ?? a[i]
+  for (let i = a.length - 4; i < a.length; i++) a[i] = toD[a[i]] ?? a[i]
+  return a.join('')
+}
+export const prettyPlate = (p: string) => checkPlate(p).pretty
+
+// ---------- the bill ----------
+export type Line = { label: string; paise: number }
+export type Bill = { minutes: number; chargedHours: number; lines: Line[]; totalPaise: number; prepaidPaise: number; duePaise: number; inGrace: boolean }
+
+/** Charge for one stay of `minutes`, under `rate` with `graceMin`. Pure: the same inputs always give the same bill. */
+export function charge(minutes: number, rate: Rate, graceMin: number): { lines: Line[]; total: number; hours: number; inGrace: boolean } {
+  if (minutes <= graceMin) return { lines: [{ label: `Within ${graceMin}-min grace`, paise: 0 }], total: 0, hours: 0, inGrace: true }
+  const lines: Line[] = []
+  let total = 0
+  const days = Math.floor(minutes / (24 * 60))
+  let rest = minutes - days * 24 * 60
+  const dayCharge = (mins: number) => {
+    if (mins <= 0) return { p: 0, extra: 0 }
+    const hrs = Math.ceil(mins / 60) // every started hour
+    const extra = Math.max(0, hrs - rate.firstHours)
+    return { p: rate.firstPaise + extra * rate.perHourPaise, extra }
+  }
+  const full = dayCharge(24 * 60)
+  const fullDay = rate.capPaise ? Math.min(full.p, rate.capPaise) : full.p
+  if (days) { lines.push({ label: `${days} × full day (24h${rate.capPaise ? ', capped' : ''})`, paise: days * fullDay }); total += days * fullDay }
+  // After whole days, the remaining time is a fresh period with its own cap.
+  if (rest > 0) {
+    if (days && rest <= graceMin) rest = 0
+  }
+  if (rest > 0) {
+    const d = dayCharge(rest)
+    lines.push({ label: `First ${rate.firstHours}h`, paise: rate.firstPaise })
+    if (d.extra) lines.push({ label: `${d.extra} extra hour${d.extra > 1 ? 's' : ''} × ${rupees(rate.perHourPaise)}`, paise: d.extra * rate.perHourPaise })
+    if (rate.capPaise && d.p > rate.capPaise) lines.push({ label: `Daily cap ${rupees(rate.capPaise)} applied`, paise: rate.capPaise - d.p })
+    total += rate.capPaise ? Math.min(d.p, rate.capPaise) : d.p
+  }
+  return { lines, total, hours: Math.ceil(minutes / 60), inGrace: false }
+}
+
+/** Price of a prepaid block of `hours` (pay at entry). */
+export function prepaidPrice(hours: number, rate: Rate) {
+  return charge(hours * 60, rate, 0).total
+}
+
+export function billFor(db: DB, t: Ticket, at: number): Bill {
+  const tv = db.tariffs.find(x => x.id === t.tariffId)!
+  const rate = tv.rates[t.category]
+  const minutes = Math.floor(((t.exitAt ?? at) - t.entryAt) / MIN)
+  const c = charge(minutes, rate, tv.graceMin)
+  const prepaid = db.payments.filter(p => p.ticketId === t.id && p.kind === 'prepaid').reduce((s, p) => s + p.amountPaise, 0)
+  const paidExit = db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').reduce((s, p) => s + p.amountPaise, 0)
+  // Pay at entry: the customer always pays at least the block they chose, even if they leave early.
+  const total = Math.max(c.total, prepaid)
+  const lines = [...c.lines]
+  if (prepaid && c.total < prepaid) lines.push({ label: 'Minimum: prepaid block', paise: prepaid - c.total })
+  if (prepaid) lines.push({ label: 'Paid at entry', paise: -prepaid })
+  return { minutes, chargedHours: c.hours, lines, totalPaise: total, prepaidPaise: prepaid, duePaise: Math.max(0, total - prepaid - paidExit), inGrace: c.inGrace }
+}
+
+// ---------- storage ----------
+const uid = () => Math.random().toString(36).slice(2, 10)
+function token() {
+  const b = new Uint8Array(16); crypto.getRandomValues(b)
+  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+}
+
+export function seed(): DB {
+  const now = Date.now()
+  const rates: Record<string, Rate> = {
+    bike: { firstHours: 2, firstPaise: 1000, perHourPaise: 1000, capPaise: 10000 },
+    auto: { firstHours: 2, firstPaise: 2000, perHourPaise: 1000, capPaise: 15000 },
+    car: { firstHours: 2, firstPaise: 3000, perHourPaise: 2000, capPaise: 30000 },
+    suv: { firstHours: 2, firstPaise: 4000, perHourPaise: 2500, capPaise: 35000 },
+    van: { firstHours: 2, firstPaise: 5000, perHourPaise: 3000, capPaise: 40000 },
+    truck: { firstHours: 2, firstPaise: 10000, perHourPaise: 5000, capPaise: 80000 },
+  }
+  const db: DB = {
+    seq: 100,
+    staff: [
+      { id: 'ravi', name: 'Ravi (Entry gate)', role: 'attendant', gate: 'Gate 1 Entry' },
+      { id: 'sunil', name: 'Sunil (Exit gate)', role: 'attendant', gate: 'Gate 2 Exit' },
+      { id: 'owner', name: 'Owner', role: 'owner', gate: 'Office' },
+    ],
+    categories: [
+      { id: 'bike', name: 'Two-wheeler', icon: 'bike', active: true },
+      { id: 'auto', name: 'Auto-rickshaw', icon: 'auto', active: true },
+      { id: 'car', name: 'Car', icon: 'car', active: true },
+      { id: 'suv', name: 'SUV', icon: 'suv', active: true },
+      { id: 'van', name: 'Van', icon: 'van', active: true },
+      { id: 'truck', name: 'Truck', icon: 'truck', active: true },
+    ],
+    tariffs: [{ id: 'tv1', version: 1, createdAt: now - 10 * 24 * HOUR, createdBy: 'Owner', note: 'Test tariff', graceMin: 5, rates }],
+    settings: { siteName: 'City Centre Parking', operator: 'Your Parking Co.', address: 'Pune, Maharashtra', phone: '+91 00000 00000', payAtEntry: false, cancelNeedsReason: false, capacity: 500 },
+    tickets: [], payments: [], audit: [],
+  }
+  sampleHistory(db, now)
+  return db
+}
+
+/** Seven days of believable traffic so the dashboard has something to show. Marked as sample in the audit. */
+function sampleHistory(db: DB, now: number) {
+  const plates = ['MH12AB', 'MH14CD', 'MH12KL', 'KA01MN', 'MH12PQ', 'GJ05RS', 'MH43TU', 'DL3CVW']
+  const cats = ['car', 'car', 'car', 'bike', 'bike', 'bike', 'suv', 'auto', 'van', 'truck']
+  let r = 7
+  const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280
+  for (let d = 6; d >= 0; d--) {
+    const dayStart = new Date(istDay(now - d * 24 * HOUR) + 'T00:00:00+05:30').getTime()
+    const n = 25 + Math.floor(rnd() * 30)
+    for (let i = 0; i < n; i++) {
+      const entryAt = dayStart + (7 + rnd() * 14) * HOUR
+      if (entryAt > now - 20 * MIN) continue
+      const stay = (10 + rnd() * rnd() * 420) * MIN
+      const cat = cats[Math.floor(rnd() * cats.length)]
+      const plate = plates[Math.floor(rnd() * plates.length)] + String(1000 + Math.floor(rnd() * 8999))
+      const t = newTicket(db, plate, cat, 'ravi', entryAt, 0)
+      db.audit.push({ id: uid(), at: entryAt, by: 'Ravi (Entry gate)', kind: 'entry', ticketId: t.id, text: `Sample entry ${prettyPlate(plate)}` })
+      const exitAt = entryAt + stay
+      if (exitAt < now && rnd() > 0.04) {
+        const b = billFor(db, { ...t, exitAt }, exitAt)
+        if (b.duePaise) addPayment(db, t, b.duePaise, 'sunil', exitAt - MIN, 'exit')
+        Object.assign(t, { status: 'exited', exitAt, exitGate: 'Gate 2 Exit', exitBy: 'Sunil (Exit gate)', billedAt: exitAt, totalPaise: b.totalPaise })
+        db.audit.push({ id: uid(), at: exitAt, by: 'Sunil (Exit gate)', kind: 'exit', ticketId: t.id, text: `Sample exit, ${rupees(b.totalPaise)}`, amountPaise: b.totalPaise })
+      } else if (exitAt < now) {
+        Object.assign(t, { status: 'cancelled', cancelledAt: entryAt + 2 * MIN, cancelledBy: 'Ravi (Entry gate)' })
+        db.audit.push({ id: uid(), at: entryAt + 2 * MIN, by: 'Ravi (Entry gate)', kind: 'cancel', ticketId: t.id, text: 'Sample cancel (wrong vehicle type)' })
+      }
+    }
+  }
+}
+
+function newTicket(db: DB, plate: string, category: string, staffId: string, at: number, prepaidHours: number): Ticket {
+  const s = db.staff.find(x => x.id === staffId)!
+  const tv = activeTariff(db, at)
+  const t: Ticket = {
+    id: 'T-' + String(++db.seq).padStart(6, '0'), token: token(), plate: normPlate(plate), category,
+    site: db.settings.siteName, entryGate: s.gate, entryBy: s.name, entryAt: at, tariffId: tv.id,
+    prepaidHours, status: 'inside', prints: 0, rev: 1,
+  }
+  db.tickets.push(t)
+  return t
+}
+function addPayment(db: DB, t: Ticket, amountPaise: number, staffId: string, at: number, kind: Payment['kind']) {
+  const s = db.staff.find(x => x.id === staffId)!
+  const p: Payment = { id: uid(), ticketId: t.id, amountPaise, method: 'cash', at, by: s.name, kind, receiptNo: 'R-' + String(db.payments.length + 1).padStart(6, '0') }
+  db.payments.push(p)
+  return p
+}
+
+export function activeTariff(db: DB, at = Date.now()) {
+  return [...db.tariffs].filter(t => t.createdAt <= at).sort((a, b) => b.version - a.version)[0] ?? db.tariffs[0]
+}
+
+export function load(): DB {
+  try { const s = localStorage.getItem(KEY); if (s) return JSON.parse(s) } catch { /* fall through */ }
+  const db = seed(); save(db); return db
+}
+export function save(db: DB) { try { localStorage.setItem(KEY, JSON.stringify(db)) } catch { /* demo only */ } }
+export function reset() { const db = seed(); save(db); return db }
+
+// ---------- actions (each one is a "server call": re-reads, checks, writes, audits) ----------
+export class Refused extends Error {}
+type Act<A extends unknown[], R> = (staffId: string, ...a: A) => R
+
+function tx<A extends unknown[], R>(fn: (db: DB, s: Staff, ...a: A) => R): Act<A, R> {
+  return (staffId, ...a) => {
+    const db = load() // always the latest copy, like a fresh server read
+    const s = db.staff.find(x => x.id === staffId)
+    if (!s) throw new Refused('Unknown staff')
+    const r = fn(db, s, ...a)
+    save(db)
+    window.dispatchEvent(new Event('parking-change'))
+    return r
+  }
+}
+const log = (db: DB, s: Staff, kind: AuditKind, text: string, ticketId?: string, amountPaise?: number) =>
+  db.audit.push({ id: uid(), at: Date.now(), by: s.name, kind, text, ticketId, amountPaise })
+
+export const findActiveByPlate = (db: DB, plate: string) => db.tickets.find(t => t.plate === normPlate(plate) && (t.status === 'inside' || t.status === 'paid'))
+
+/** Create the entry. If the plate is already inside, return that ticket instead of making a second one. */
+export const createEntry = tx((db, s, plate: string, category: string, prepaidHours: number, plateNote?: string) => {
+  const existing = findActiveByPlate(db, plate)
+  if (existing) { log(db, s, 'duplicate_blocked', `Second entry blocked for ${prettyPlate(plate)}; existing ticket shown`, existing.id); return { ticket: existing, duplicate: true } }
+  const t = newTicket(db, plate, category, s.id, Date.now(), prepaidHours)
+  log(db, s, 'entry', `Entry ${prettyPlate(t.plate)} · ${db.categories.find(c => c.id === category)?.name}${plateNote ? ` · plate confirmed: ${plateNote}` : ''}`, t.id)
+  if (prepaidHours) {
+    const tv = db.tariffs.find(x => x.id === t.tariffId)!
+    const amt = prepaidPrice(prepaidHours, tv.rates[category])
+    addPayment(db, t, amt, s.id, Date.now(), 'prepaid')
+    log(db, s, 'payment', `Cash ${rupees(amt)} at entry for ${prepaidHours}h`, t.id, amt)
+  }
+  return { ticket: t, duplicate: false }
+})
+
+export const markPrinted = tx((db, s, id: string) => {
+  const t = db.tickets.find(x => x.id === id)!
+  t.prints++
+  log(db, s, t.prints > 1 ? 'reprint' : 'print', t.prints > 1 ? `Reprint #${t.prints - 1} of slip` : 'Slip printed', id)
+  return t.prints
+})
+
+export const logLookup = tx((db, s, id: string, how: 'plate' | 'qr' | 'search') => {
+  log(db, s, how === 'qr' ? 'lookup_qr' : 'lookup_plate', how === 'qr' ? 'Opened by ticket QR / ID' : `Found by plate (${how === 'plate' ? 'slip not used' : 'search'})`, id)
+})
+
+/** Take cash for what is due now. `rev` must match, so two attendants cannot both collect. */
+export const takeCash = tx((db, s, id: string, rev: number, expectedPaise: number) => {
+  const t = db.tickets.find(x => x.id === id)!
+  if (t.status !== 'inside') throw new Refused(t.status === 'paid' ? 'Already paid. Another attendant collected this.' : `Ticket is ${t.status}.`)
+  if (t.rev !== rev) throw new Refused('This ticket changed on another device. Reload it.')
+  const now = Date.now()
+  const b = billFor(db, t, now)
+  if (b.duePaise !== expectedPaise) throw new Refused(`Amount changed to ${rupees(b.duePaise)} (time moved on). Check and try again.`)
+  if (b.duePaise) addPayment(db, t, b.duePaise, s.id, now, 'exit')
+  t.status = 'paid'; t.billedAt = now; t.totalPaise = b.totalPaise; t.rev++
+  log(db, s, 'payment', b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
+  return t
+})
+
+export const recordExit = tx((db, s, id: string) => {
+  const t = db.tickets.find(x => x.id === id)!
+  if (t.status !== 'paid') throw new Refused(t.status === 'exited' ? 'Vehicle already marked as left.' : 'Take payment first.')
+  t.status = 'exited'; t.exitAt = Date.now(); t.exitBy = s.name; t.exitGate = s.gate; t.rev++
+  log(db, s, 'exit', `Vehicle left · ${rupees(t.totalPaise ?? 0)}`, id, t.totalPaise)
+  return t
+})
+
+export const cancelTicket = tx((db, s, id: string, reason: string) => {
+  const t = db.tickets.find(x => x.id === id)!
+  if (t.status === 'exited' || t.status === 'cancelled') throw new Refused(`Ticket is already ${t.status}.`)
+  if (db.settings.cancelNeedsReason && !reason.trim()) throw new Refused('A reason is required (Owner setting).')
+  t.status = 'cancelled'; t.cancelledAt = Date.now(); t.cancelledBy = s.name; t.cancelReason = reason; t.rev++
+  log(db, s, 'cancel', `Cancelled${reason ? `: ${reason}` : ' (no reason)'}`, id)
+})
+
+export const publishTariff = tx((db, s, graceMin: number, rates: Record<string, Rate>, note: string) => {
+  if (s.role !== 'owner') throw new Refused('Only the Owner can change rates.')
+  const v = Math.max(...db.tariffs.map(t => t.version)) + 1
+  db.tariffs.push({ id: 'tv' + v, version: v, createdAt: Date.now(), createdBy: s.name, note, graceMin, rates })
+  log(db, s, 'tariff', `Published rates v${v}${note ? `: ${note}` : ''}. Vehicles already inside keep their entry rates.`)
+})
+
+export const saveSettings = tx((db, s, next: Settings) => {
+  if (s.role !== 'owner') throw new Refused('Only the Owner can change settings.')
+  const changed = (Object.keys(next) as (keyof Settings)[]).filter(k => next[k] !== db.settings[k])
+  db.settings = next
+  if (changed.length) log(db, s, 'settings', `Changed: ${changed.join(', ')}`)
+})
+
+export const byToken = (db: DB, tk: string) => db.tickets.find(t => t.token === tk)

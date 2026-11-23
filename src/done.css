@@ -1,0 +1,32 @@
+/* Save feedback on the pressed button (lib/done.ts) */
+.pay-done{position:fixed;z-index:200;display:flex;align-items:center;justify-content:center;gap:8px;pointer-events:none;opacity:0;
+  background:var(--color-accent-solid,#2f5bea);color:var(--color-text-on-accent,#fff);box-sizing:border-box;overflow:hidden}
+.pay-done.pd-float{box-shadow:0 10px 30px rgba(10,20,40,.25)}
+.pay-done.pd-on{opacity:1;transition:opacity .15s ease-out}
+.pay-done.pd-ok{background:var(--color-success-solid,#1a9e5a);transition:background .3s ease-out}
+.pay-done.pd-out{opacity:0;transition:opacity .3s ease-in}
+.pay-done svg{width:24px;height:24px;flex:none;overflow:visible}
+.pay-done .pd-ring{fill:none;stroke:currentColor;stroke-width:4.5;stroke-linecap:round;stroke-dasharray:145;stroke-dashoffset:105;transform-origin:26px 26px}
+.pay-done.pd-busy .pd-ring{animation:pd-spin .8s linear infinite}
+.pay-done.pd-ok .pd-ring{animation:none;stroke-dashoffset:0;transition:stroke-dashoffset .4s cubic-bezier(.16,1,.3,1)}
+.pay-done .pd-tick{fill:none;stroke:currentColor;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:36;stroke-dashoffset:36}
+.pay-done.pd-ok .pd-tick{stroke-dashoffset:0;transition:stroke-dashoffset .35s cubic-bezier(.65,0,.35,1) .3s}
+.pay-done .pd-label{font-weight:700;font-size:15px;white-space:nowrap}
+.pay-done.pd-ok .pd-label{animation:pd-in .3s ease-out .35s both}
+.pay-done.pd-busy:not(.pd-ok) .pd-label{display:none}
+@keyframes pd-spin{to{transform:rotate(360deg)}}
+@keyframes pd-in{from{opacity:0;transform:translateX(-4px)}}
+@media (prefers-reduced-motion:reduce){.pay-done,.pay-done *{animation:none!important;transition:none!important}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pay-done.pd-ok{background:color-mix(in srgb,var(--color-success-solid,#1a9e5a) 62%,#000)}}
+:root[data-theme="dark"] .pay-done.pd-ok{background:color-mix(in srgb,var(--color-success-solid,#1a9e5a) 62%,#000)}
+.pay-done{padding:0 12px}
+/* Leave pay − / + : no double-tap zoom delay, no text getting selected on fast taps */
+.lv-paystep,.lv-paystep *{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.lv-paystep .btn{min-width:48px;min-height:44px}
+button,.btn,[role=button]{touch-action:manipulation}
+/* Tablets (owner, 21 Nov: "all types of devices"): phone pages use the wider screen instead of a narrow strip */
+@media (min-width:600px) and (max-width:999px){
+  .dz.app,.screen{max-width:760px}
+  .update-bar{max-width:728px}
+  .att-sheet{max-width:760px}
+}
