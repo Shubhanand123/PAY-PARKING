@@ -1,6 +1,7 @@
+import { publishTariff, saveSettings } from './actions'
 import { useMemo, useState } from 'react'
 import {
-  activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, publishTariff, reset, rupees, saveSettings,
+  activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, useNow } from './ui'
@@ -291,7 +292,7 @@ function Rates({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: 
             <td><input type="number" min={0} className="field small-field" value={rates[c.id].capPaise / 100} onChange={e => set(c.id, 'capPaise', e.target.value)} /></td></tr>)}</tbody>
         </table></div>
         <div className="toolbar"><input className="field small-field" placeholder="Note, e.g. Diwali rates" value={note} onChange={e => setNote(e.target.value)} />
-          <button className="btn btn-primary fit" disabled={!dirty} onClick={() => { saveStart(); try { publishTariff(me.id, grace, rates, note); setNote(''); saveEnd(true, 'Published') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Publish as v{tv.version + 1}</button></div>
+          <button className="btn btn-primary fit" disabled={!dirty} onClick={async () => { saveStart(); try { await publishTariff(me.id, grace, rates, note); setNote(''); saveEnd(true, 'Published') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Publish as v{tv.version + 1}</button></div>
       </div>
       <div className="grid2">
         <div className="card">
@@ -333,12 +334,8 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
       <div className="card grid2">
         {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
       </div>
-      <button className="btn btn-primary" onClick={() => { saveStart(); try { saveSettings(me.id, s); saveEnd(true, 'Saved') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Save settings</button>
-      <div className="card">
-        <h2>Demo data</h2>
-        <p className="muted small">This demo keeps its data in this browser only. Reset puts back the sample week.</p>
-        <button className="btn btn-ghost fit" onClick={() => { reset(); window.dispatchEvent(new Event('parking-change')); toast('Demo data reset') }}>Reset demo data</button>
-      </div>
+      <button className="btn btn-primary" onClick={async () => { saveStart(); try { await saveSettings(me.id, s); saveEnd(true, 'Saved') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Save settings</button>
+
     </div>
   )
 }

@@ -1,18 +1,16 @@
+import { readPlate, readQr } from './scan'
+import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useRef, useState } from 'react'
 import {
-  activeTariff, billFor, cancelTicket, charge, checkPlate, createEntry, findActiveByPlate, fmtDT, fmtTime, dur, logLookup, markPrinted,
-  normPlate, prepaidPrice, fmtDate, prettyPlate, recordExit, Refused, rupees, takeCash, type DB, type Staff, type Ticket,
+  activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
+  normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, type DB, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
 import { saveStart, saveEnd, saveFloat } from './done'
 import { cashCelebrate } from './celebrate'
 import { alreadyInside, ticketCancelled } from './fx'
 
-const SAMPLE_READS = [
-  { text: 'MH12AB1234', conf: 0.97 }, { text: 'MHI2CD5O78', conf: 0.61 }, { text: '22BH4521AA', conf: 0.93 }, { text: 'KA01MN4455', conf: 0.88 },
-]
-
-// ---------- the printed slip (simulated 58 mm) ----------
+// ---------- 58 mm parking slip ----------
 export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean }) {
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const r = tv.rates[t.category]
@@ -21,7 +19,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
   const b = receipt ? billFor(db, t, t.billedAt ?? Date.now()) : null
   return (
     <div className="slip" aria-label={receipt ? 'Receipt preview' : 'Entry slip preview'}>
-      <div className="slip-sim">SIMULATED PRINT · 58 mm</div>
+      <div className="slip-sim">58 mm</div>
       <b className="slip-h">{db.settings.operator}</b>
       <div>{db.settings.siteName}</div>
       <div className="slip-s">{db.settings.address} · {db.settings.phone}</div>
@@ -68,33 +66,41 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const [busy, setBusy] = useState(false)
   const [printFail, setPrintFail] = useState(false)
   const [scanning, setScanning] = useState(false)
-  const reads = useRef(0)
+  const camera = useRef<HTMLInputElement>(null)
   const inp = useRef<HTMLInputElement>(null)
   const chk = plate ? checkPlate(plate) : null
   const already = plate.length >= 6 ? findActiveByPlate(db, plate) : undefined
   const tv = activeTariff(db)
 
-  const scan = () => {
+  const scan = async (file?: File) => {
+    if (!file) return
     setScanning(true)
-    setTimeout(() => {
-      const r = SAMPLE_READS[reads.current++ % SAMPLE_READS.length]
-      setPlate(r.text); setConf(r.conf); setScanning(false)
-    }, 700)
+    try {
+      const result = await readPlate(file)
+      setPlate(result.plate)
+      setConf(result.confidence)
+      toast('Check the scanned registration before saving.')
+    } catch (error) { toast((error as Error).message, true) }
+    finally { setScanning(false); inp.current?.focus() }
   }
-  const confirm = () => {
+  const confirm = async () => {
     if (busy) return // one tap only
     setBusy(true)
     try {
       const note = chk && chk.kind === 'unknown' ? 'unusual format, operator confirmed' : conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
-      const r = createEntry(me.id, plate, cat, db.settings.payAtEntry ? hours : 0, note)
+      const r = await createEntry(me.id, plate, cat, db.settings.payAtEntry ? hours : 0, note)
       setDone({ t: r.ticket, dup: r.duplicate })
-      if (!r.duplicate) print(r.ticket)
-      else alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
+      if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
-  const print = (t: Ticket, simulateFail = false) => {
-    if (simulateFail) { setPrintFail(true); toast('Printer did not respond. Ticket is saved; reprint it.', true); return }
-    setPrintFail(false); markPrinted(me.id, t.id)
+  const print = async (t: Ticket) => {
+    try {
+      await markPrinted(me.id, t.id)
+      setPrintFail(false)
+    } catch (error) {
+      setPrintFail(true)
+      toast((error as Error).message, true)
+    }
   }
   const next = () => { setDone(null); setPlate(''); setConf(null); setCat(''); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
 
@@ -104,13 +110,13 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       <div className="stack">
         {done.dup
           ? <div className="banner banner-warn"><Ico n="warn" /> <div><b>Already inside.</b> {prettyPlate(t.plate)} came in at {fmtTime(t.entryAt)}. No new ticket was made. You can reprint this one.</div></div>
-          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'Print failed. Use Reprint below.' : 'Slip sent to printer.'}</div></div>}
+          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'Print failed. Use Reprint below.' : 'Slip ready to print.'}</div></div>}
         <Slip db={db} t={t} />
         <div className="row2">
-          <button className="btn btn-ghost" onClick={() => print(t)}><Ico n="print" /> {printFail ? 'Retry print' : 'Reprint'}</button>
+          <button className="btn btn-ghost" onClick={() => { window.print(); void print(t) }}><Ico n="print" /> {printFail ? 'Retry print' : 'Reprint'}</button>
           <button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" /> Save · Next vehicle</button>
         </div>
-        <button className="link subtle" onClick={() => print(t, true)}>Demo: pretend the printer failed</button>
+
       </div>
     )
   }
@@ -118,8 +124,9 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   return (
     <div className="stack">
       <div className="card">
-        <button className="btn btn-primary btn-xl" onClick={scan} disabled={scanning}><Ico n="scan" size={26} /> {scanning ? 'Reading plate…' : 'Scan Plate'}</button>
-        <p className="tiny muted center">Plate reading is simulated in this demo. Typing always works.</p>
+        <button className="btn btn-primary btn-xl" onClick={() => camera.current?.click()} disabled={scanning}><Ico n="scan" size={26} /> {scanning ? 'Reading plate…' : 'Scan Plate'}</button>
+        <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={event => { void scan(event.target.files?.[0]); event.target.value = '' }} />
+        <p className="tiny muted center">Photograph the plate close up, or type the number.</p>
         <label className="lbl" htmlFor="plate">Vehicle number</label>
         <input id="plate" ref={inp} className="field plate-field" value={plate} autoFocus inputMode="text" autoCapitalize="characters" autoComplete="off"
           placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null) }} />
@@ -157,34 +164,50 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 // ---------- exit ----------
 export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [q, setQ] = useState('')
+  const [reading, setReading] = useState(false)
   const [id, setId] = useState<string | null>(null)
   const [pick, setPick] = useState<Ticket[] | null>(null)
   const [confirmLost, setConfirmLost] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [reason, setReason] = useState('')
   const [rev, setRev] = useState(0)
+  const [busy, setBusy] = useState(false)
   const now = useNow(10000)
   const t = id ? db.tickets.find(x => x.id === id) : undefined
   const active = db.tickets.filter(x => x.status === 'inside' || x.status === 'paid')
   const nq = normPlate(q)
   const filtered = nq.length >= 2 ? active.filter(x => x.plate.includes(nq) || x.id.replace('-', '').includes(nq)) : active
 
-  const open = (x: Ticket, how: 'plate' | 'qr' | 'search') => { setId(x.id); setRev(x.rev); setPick(null); setConfirmLost(how !== 'qr'); logLookup(me.id, x.id, how) }
-  const find = (how: 'qr' | 'plate') => {
-    const s = q.trim()
+  const open = (x: Ticket, how: 'plate' | 'qr' | 'search') => { setId(x.id); setRev(x.rev); setPick(null); setConfirmLost(how !== 'qr'); void logLookup(me.id, x.id, how).catch(error => toast(error.message, true)) }
+  const find = (how: 'qr' | 'plate' | 'auto', input = q) => {
+    const s = input.trim()
+    setPick(null)
     if (!s) return
-    if (how === 'qr') {
-      const tk = s.includes('#/t/') ? s.split('#/t/')[1] : s
-      const x = db.tickets.find(y => y.token === tk || y.id.toUpperCase() === s.toUpperCase() || y.id === 'T-' + s.padStart(6, '0'))
-      if (!x) return toast('No ticket with that QR or number.', true)
-      return open(x, 'qr')
+    if (how !== 'plate') {
+      const ticket = findTicketBySlip(db.tickets, s)
+      if (ticket) return open(ticket, 'qr')
+      if (how === 'qr' || /^T-?\d+$|#\/t\//i.test(s)) {
+        return toast('No ticket with that QR or number.', true)
+      }
     }
     const n = normPlate(s)
+    if (n.length < 2) return toast('Enter a vehicle number or its last 4 digits.', true)
     const exact = active.find(y => y.plate === n)
     if (exact) return open(exact, 'plate')
     const near = active.filter(y => y.plate.includes(n) || n.includes(y.plate.slice(-4)) || y.plate.slice(-4) === n.slice(-4))
     if (!near.length) return toast('No vehicle inside matches. Try the last 4 digits.', true)
     setPick(near)
+  }
+  const scanExit = async (kind: 'qr' | 'plate', file?: File) => {
+    if (!file) return
+    setReading(true)
+    try {
+      const value = kind === 'qr' ? await readQr(file) : (await readPlate(file)).plate
+      setQ(value)
+      if (kind === 'qr') find(kind, value)
+      else toast('Check the scanned registration, then tap Plate.')
+    } catch (error) { toast((error as Error).message, true) }
+    finally { setReading(false) }
   }
   const reset = () => { setId(null); setQ(''); setPick(null); setCancelling(false); setReason('') }
 
@@ -192,7 +215,14 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     const b = billFor(db, t, now)
     const cat = db.categories.find(c => c.id === t.category)
     const stale = t.rev !== rev
-    const act = (label: string, fn: () => void) => { if (label) { saveFloat(); saveStart() } try { fn(); if (label) saveEnd(true, label) } catch (e) { if (label) saveEnd(false, ''); toast(e instanceof Refused ? e.message : 'Something went wrong', true) } }
+    const act = async (label: string, fn: () => Promise<void>) => {
+      if (busy) return
+      setBusy(true)
+      if (label) { saveFloat(); saveStart() }
+      try { await fn(); if (label) saveEnd(true, label) }
+      catch (error) { if (label) saveEnd(false, ''); toast((error as Error).message, true) }
+      finally { setBusy(false) }
+    }
     return (
       <div className="stack">
         <button className="link left" onClick={reset}><Ico n="back" size={18} /> New lookup</button>
@@ -216,20 +246,20 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
           <p className="tiny muted">If the clock passes the next hour before you collect, the amount is checked again.</p>
         </div>}
         {stale && t.status !== 'cancelled' && <div className="banner banner-warn"><Ico n="warn" /><div>This ticket was changed on another device. <button className="link" onClick={() => setRev(t.rev)}>Reload</button></div></div>}
-        {t.status === 'inside' && !stale && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} onClick={() => act(b.duePaise ? '' : 'Done', () => { const r = takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
+        {t.status === 'inside' && !stale && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
           {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> Nothing due · Continue</>}
         </button></div>}
         {t.status === 'paid' && <>
           <div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>{t.totalPaise ? `Paid ${rupees(t.totalPaise)}` : 'Nothing due'}</b><span>Let the vehicle out, then tap below.</span></div></div>
-          <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={stale} onClick={() => act('', () => { const r = recordExit(me.id, t.id); setRev(r.rev); markPrinted(me.id, t.id) })}><Ico n="out" size={24} /> Vehicle left · Print receipt</button></div>
+          <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('', async () => { const r = await recordExit(me.id, t.id); setRev(r.rev) })}><Ico n="out" size={24} /> Vehicle left · Close ticket</button></div>
         </>}
-        {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}. Receipt printed.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Save · Next vehicle</button></>}
+        {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}. Receipt ready to print.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-ghost" onClick={() => { window.print(); void markPrinted(me.id, t.id).catch(error => toast(error.message, true)) }}><Ico n="print" /> Print receipt</button><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Save · Next vehicle</button></>}
         {t.status === 'cancelled' && <div className="banner banner-bad"><Ico n="x" /><div><b>Cancelled</b> by {t.cancelledBy} at {fmtTime(t.cancelledAt!)}{t.cancelReason ? `: ${t.cancelReason}` : ''}.</div></div>}
         {(t.status === 'inside' || t.status === 'paid') && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
         {cancelling && <div className="card">
           <label className="lbl" htmlFor="rsn">Reason {db.settings.cancelNeedsReason ? '(required)' : '(optional)'}</label>
           <input id="rsn" className="field small-field" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong vehicle type" />
-          <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', () => { cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
+          <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', async () => { await cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
         </div>}
       </div>
     )
@@ -239,12 +269,17 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     <div className="stack">
       <div className="card">
         <label className="lbl" htmlFor="q">Scan the slip QR, or enter plate / ticket number</label>
-        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && find(/^T-?\d|^\d+$|#\/t\//i.test(q.trim()) ? 'qr' : 'plate')} />
+        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => { setQ(e.target.value); setPick(null) }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
         <div className="row2">
           <button className="btn btn-ghost" onClick={() => find('qr')}><Ico n="qr" /> Ticket / QR</button>
           <button className="btn btn-primary" onClick={() => find('plate')}><Ico n="search" /> Plate</button>
         </div>
-        <p className="tiny muted">Camera QR and plate scanning come with the POS milestone. In this demo, tap a vehicle below or type.</p>
+        <div className="row2">
+          <label className="btn btn-ghost"><Ico n="qr" /> Camera QR<input type="file" accept="image/*" capture="environment" className="scan-input" aria-label="Camera QR" disabled={reading} onChange={event => { void scanExit('qr', event.target.files?.[0]); event.target.value = '' }} /></label>
+          <label className="btn btn-ghost"><Ico n="scan" /> Camera plate<input type="file" accept="image/*" capture="environment" className="scan-input" aria-label="Camera plate" disabled={reading} onChange={event => { void scanExit('plate', event.target.files?.[0]); event.target.value = '' }} /></label>
+        </div>
+        {reading && <p role="status">Reading camera image…</p>}
+        <p className="tiny muted">Use a QR scanner that types into this field and sends Enter, or enter a plate or ticket number manually.</p>
       </div>
       {pick && <div className="card">
         <h2>Which vehicle?</h2><p className="muted small">No exact match. Pick the right one and check it.</p>
@@ -254,7 +289,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         <h2>{filtered.length !== active.length ? <>Matches <span className="muted">({filtered.length} of {active.length})</span></> : <>Inside now <span className="muted">({active.length})</span></>}</h2>
         <div className="inside-list">
           {filtered.slice().reverse().slice(0, 40).map(x => (
-            <button key={x.id} className="listrow vrow" onClick={() => open(x, filtered.length === active.length ? 'qr' : 'search')}>
+            <button key={x.id} className="listrow vrow" onClick={() => open(x, 'search')}>
               <span className="vr-ico"><Ico n={db.categories.find(c => c.id === x.category)?.icon ?? 'car'} size={26} /></span>
               <span className="vr-main"><b>{prettyPlate(x.plate)}</b><small>in {fmtTime(x.entryAt)} · {dur(now - x.entryAt)}</small></span>
               {x.status === 'paid' ? <Pill tone="ok">Paid</Pill> : <span className="vr-fee num">{rupees(billFor(db, x, now).duePaise)}</span>}
