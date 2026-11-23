@@ -302,6 +302,17 @@ export const markPrinted = tx((db, s, id: string) => {
   return t.prints
 })
 
+export function findTicketBySlip(tickets: Ticket[], input: string): Ticket | undefined {
+  const value = input.trim()
+  if (!value) return undefined
+
+  const route = /#\/t\/([^/?#]+)$/i.exec(value)
+  const token = route?.[1] ?? value
+  const number = /^(?:T-?)?(\d+)$/i.exec(value)?.[1]
+  const id = number ? 'T-' + number.padStart(6, '0') : undefined
+  return tickets.find(ticket => ticket.token === token || ticket.id === id)
+}
+
 export const logLookup = tx((db, s, id: string, how: 'plate' | 'qr' | 'search') => {
   log(db, s, how === 'qr' ? 'lookup_qr' : 'lookup_plate', how === 'qr' ? 'Opened by ticket QR / ID' : `Found by plate (${how === 'plate' ? 'slip not used' : 'search'})`, id)
 })

@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "build:single": "SINGLEFILE=1 tsc -b && SINGLEFILE=1 vite build",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

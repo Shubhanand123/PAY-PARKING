@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import {
-  activeTariff, billFor, cancelTicket, charge, checkPlate, createEntry, findActiveByPlate, fmtDT, fmtTime, dur, logLookup, markPrinted,
+  activeTariff, billFor, cancelTicket, charge, checkPlate, createEntry, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur, logLookup, markPrinted,
   normPlate, prepaidPrice, fmtDate, prettyPlate, recordExit, Refused, rupees, takeCash, type DB, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
@@ -170,16 +170,19 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
   const filtered = nq.length >= 2 ? active.filter(x => x.plate.includes(nq) || x.id.replace('-', '').includes(nq)) : active
 
   const open = (x: Ticket, how: 'plate' | 'qr' | 'search') => { setId(x.id); setRev(x.rev); setPick(null); setConfirmLost(how !== 'qr'); logLookup(me.id, x.id, how) }
-  const find = (how: 'qr' | 'plate') => {
+  const find = (how: 'qr' | 'plate' | 'auto') => {
     const s = q.trim()
+    setPick(null)
     if (!s) return
-    if (how === 'qr') {
-      const tk = s.includes('#/t/') ? s.split('#/t/')[1] : s
-      const x = db.tickets.find(y => y.token === tk || y.id.toUpperCase() === s.toUpperCase() || y.id === 'T-' + s.padStart(6, '0'))
-      if (!x) return toast('No ticket with that QR or number.', true)
-      return open(x, 'qr')
+    if (how !== 'plate') {
+      const ticket = findTicketBySlip(db.tickets, s)
+      if (ticket) return open(ticket, 'qr')
+      if (how === 'qr' || /^T-?\d+$|#\/t\//i.test(s)) {
+        return toast('No ticket with that QR or number.', true)
+      }
     }
     const n = normPlate(s)
+    if (n.length < 2) return toast('Enter a vehicle number or its last 4 digits.', true)
     const exact = active.find(y => y.plate === n)
     if (exact) return open(exact, 'plate')
     const near = active.filter(y => y.plate.includes(n) || n.includes(y.plate.slice(-4)) || y.plate.slice(-4) === n.slice(-4))
@@ -239,12 +242,12 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     <div className="stack">
       <div className="card">
         <label className="lbl" htmlFor="q">Scan the slip QR, or enter plate / ticket number</label>
-        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && find(/^T-?\d|^\d+$|#\/t\//i.test(q.trim()) ? 'qr' : 'plate')} />
+        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => { setQ(e.target.value); setPick(null) }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
         <div className="row2">
           <button className="btn btn-ghost" onClick={() => find('qr')}><Ico n="qr" /> Ticket / QR</button>
           <button className="btn btn-primary" onClick={() => find('plate')}><Ico n="search" /> Plate</button>
         </div>
-        <p className="tiny muted">Camera QR and plate scanning come with the POS milestone. In this demo, tap a vehicle below or type.</p>
+        <p className="tiny muted">Use a QR scanner that types into this field and sends Enter, or enter a plate or ticket number manually.</p>
       </div>
       {pick && <div className="card">
         <h2>Which vehicle?</h2><p className="muted small">No exact match. Pick the right one and check it.</p>
@@ -254,7 +257,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         <h2>{filtered.length !== active.length ? <>Matches <span className="muted">({filtered.length} of {active.length})</span></> : <>Inside now <span className="muted">({active.length})</span></>}</h2>
         <div className="inside-list">
           {filtered.slice().reverse().slice(0, 40).map(x => (
-            <button key={x.id} className="listrow vrow" onClick={() => open(x, filtered.length === active.length ? 'qr' : 'search')}>
+            <button key={x.id} className="listrow vrow" onClick={() => open(x, 'search')}>
               <span className="vr-ico"><Ico n={db.categories.find(c => c.id === x.category)?.icon ?? 'car'} size={26} /></span>
               <span className="vr-main"><b>{prettyPlate(x.plate)}</b><small>in {fmtTime(x.entryAt)} · {dur(now - x.entryAt)}</small></span>
               {x.status === 'paid' ? <Pill tone="ok">Paid</Pill> : <span className="vr-fee num">{rupees(billFor(db, x, now).duePaise)}</span>}
