@@ -68,8 +68,8 @@ The publishable key in the production configuration is safe for client use.
 ### Live plate scanning
 
 The entry and exit plate buttons scan live video frames inside the camera guide.
-Three agreeing high-confidence frames can fill the editable plate field. Smaller
-or conflicting readings can be reviewed manually. Similar active records at
+Two strong, agreeing frames can fill the editable plate field immediately.
+Weaker or conflicting readings require more frames or manual review. Similar active records at
 exit are presented for operator confirmation. Camera frames stay in the browser
 and are not retained by the scanner.
 

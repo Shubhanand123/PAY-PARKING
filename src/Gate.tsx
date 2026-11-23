@@ -1,10 +1,11 @@
 import { PlateScanner } from './PlateScanner'
+import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
-  normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, type DB, type Staff, type Ticket,
+  isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, type DB, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
 import { saveStart, saveEnd, saveFloat } from './done'
@@ -59,6 +60,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
 
 // ---------- entry ----------
 export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
+  useEffect(() => { void warmPlateReader().catch(() => {}) }, [])
   const [plate, setPlate] = useState('')
   const [conf, setConf] = useState<number | null>(null)
   const [cat, setCat] = useState('')
@@ -71,6 +73,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const [alternatives, setAlternatives] = useState<string[]>([])
   const inp = useRef<HTMLInputElement>(null)
   const chk = plate ? checkPlate(plate) : null
+  const validPlate = isSupportedPlateFormat(plate)
   const already = plate.length >= 4 ? findActiveByPlate(db, plate) : undefined
   const tv = activeTariff(db)
   const prepaid = db.settings.payAtEntry && paymentTiming === 'before' && !already
@@ -81,7 +84,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
     if (busy) return // one tap only
     setBusy(true)
     try {
-      const note = chk && chk.kind === 'unknown' ? 'unusual format, operator confirmed' : conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
+      const note = conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
       const r = await createEntry(me.id, plate, cat || already?.category || '', prepaid ? hours : 0, note, advance)
       setDone({ t: r.ticket, dup: r.duplicate })
       if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
@@ -130,10 +133,10 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
         <input id="plate" ref={inp} className="field plate-field" value={plate} autoFocus inputMode="text" autoCapitalize="characters" autoComplete="off"
           placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
         {chk && <div className="plate-meta">
-          {chk.kind !== 'unknown' ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">{chk.hint}</Pill>}
+          {validPlate ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">Check the plate format, e.g. GA 01 AB 1234</Pill>}
           {conf !== null && <Pill tone="warn">Check the scanned plate</Pill>}
         </div>}
-        {chk?.suggestion && <button className="btn btn-ghost sug" onClick={() => { setPlate(chk.suggestion!); setConf(null) }}>Use {prettyPlate(chk.suggestion)}</button>}
+        {chk?.suggestion && isSupportedPlateFormat(chk.suggestion) && <button className="btn btn-ghost sug" onClick={() => { setPlate(chk.suggestion!); setConf(null) }}>Use {prettyPlate(chk.suggestion)}</button>}
         {conf !== null && /[VY]/.test(plate) && <p className="tiny muted">Check V and Y against the plate.</p>}
         {alternatives.length > 0 && <div className="chips" aria-label="Other camera readings">{alternatives.map(value =>
           <button key={value} className="chip" onClick={() => { setPlate(value); setAlternatives([]) }}>Try {prettyPlate(value)}</button>
@@ -167,7 +170,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
           </div>}
         </fieldset>
       )}
-      <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={plate.length < 4 || (!cat && !already) || busy || scanning} onClick={confirm}>
+      <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={(!validPlate && !already) || (!cat && !already) || busy || scanning} onClick={confirm}>
         <Ico n={already ? 'search' : 'check'} size={24} />
         {busy ? 'Saving…' : already ? 'Open existing ticket' : prepaid && advance > 0 ? `Record ${rupees(advance)} cash & save` : 'Save entry'}
       </button></div>
@@ -177,6 +180,10 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 
 // ---------- exit ----------
 export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
+  useEffect(() => {
+    void warmPlateReader().catch(() => {})
+    void import('jsqr').catch(() => {})
+  }, [])
   const [q, setQ] = useState('')
   const [scanningPlate, setScanningPlate] = useState(false)
   const [scannedPlate, setScannedPlate] = useState(false)

@@ -79,8 +79,17 @@ export function dur(ms: number) {
 //  standard  SS RR X(XX) NNNN   e.g. MH12AB1234, DL3CAB1234, KA01A1234
 //  Bharat    YY BH NNNN X(X)    e.g. 22BH1234AA  (Bharat series, MoRTH notification Aug 2021)
 //  temporary T MMYY SS NNNN XX  e.g. T0124MH1234AB (format varies by state, so only a light check)
-export const STATES = 'AN AP AR AS BR CH CG DD DL GA GJ HR HP JK JH KA KL LA LD MP MH MN ML MZ NL OD PY PB RJ SK TN TS TR UP UK WB'.split(' ')
+export const STATES = 'AN AP AR AS BR CH CG DD DL DN GA GJ HR HP JK JH KA KL LA LD MP MH MN ML MZ NL OD OR PY PB RJ SK TN TS TG TR UP UK UA WB'.split(' ')
 export function normPlate(s: string) { return s.toUpperCase().replace(/[^A-Z0-9]/g, '') }
+// Gate validation checks the printed format. It does not query the vehicle registry.
+export function isSupportedPlateFormat(input: string) {
+  const plate = normPlate(input)
+  const standard = /^([A-Z]{2})(?:0[1-9]|[1-9]\d?)[A-Z]{0,3}\d{4}$/.exec(plate)
+  if (standard && STATES.includes(standard[1])) return true
+  if (/^\d{2}BH\d{4}[A-HJ-NP-Z]{1,2}$/.test(plate)) return true
+  const temp = /^T(?:0[1-9]|1[0-2])\d{2}([A-Z]{2})\d{4}[A-HJ-NP-Z]{1,2}$/.exec(plate)
+  return Boolean(temp && STATES.includes(temp[1]))
+}
 export type PlateCheck = { kind: 'standard' | 'bharat' | 'temporary' | 'unknown'; pretty: string; hint?: string; suggestion?: string }
 export function checkPlate(raw: string): PlateCheck {
   const p = normPlate(raw)
@@ -279,6 +288,7 @@ export const createEntry = (db: DB, s: Staff, plate: string, category: string, p
   if (normalized.length < 4 || normalized.length > 20) throw new Refused('Check the vehicle number.')
   const existing = findActiveByPlate(db, normalized)
   if (existing) { log(db, s, 'duplicate_blocked', `Second entry blocked for ${prettyPlate(plate)}; existing ticket shown`, existing.id); return { ticket: existing, duplicate: true } }
+  if (!isSupportedPlateFormat(normalized)) throw new Refused('Enter a supported Indian registration format, such as GA 01 AB 1234.')
   if (!db.categories.some(item => item.id === category && item.active) || !Object.hasOwn(activeTariff(db).rates, category)) throw new Refused('Select an available vehicle type.')
   if (!Number.isInteger(prepaidHours) || prepaidHours < 0 || prepaidHours > 24 || (!db.settings.payAtEntry && prepaidHours > 0)) throw new Refused('Check the prepaid hours and payment settings.')
   const now = Date.now()
