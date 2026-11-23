@@ -332,7 +332,6 @@ html,body{background:var(--color-bg-page)}
   .cash-cel{opacity:1}.cc-coin{transform:none}.cc-flip{transform:rotateY(180deg)}.cc-tick{stroke-dashoffset:0}
   .cc-label,.cc-amt,.cc-plate,.cc-hint{opacity:1}.cc-note,.cc-spark,.cc-ripple,.cc-glow{display:none}}
 
-.scan-input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
 .btn:focus-within { outline: 2px solid currentColor; outline-offset: 2px; }
 @media print {
   body * { visibility: hidden; }

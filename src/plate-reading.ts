@@ -42,3 +42,7 @@ export function differsByOneConfusableCharacter(read: string, stored: string) {
   }
   return differences === 1
 }
+
+export function ticketTokenFromQr(value: string) {
+  return /#\/t\/([a-f0-9]{32})$/i.exec(value.trim())?.[1].toLowerCase()
+}

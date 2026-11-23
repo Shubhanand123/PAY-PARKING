@@ -36,8 +36,8 @@ The gateway JWT check is disabled because the function validates device keys
 itself and exposes a read-only customer ticket view by opaque QR token.
 
 Scan Plate opens the camera or file chooser. Frame the registration closely
-and verify the detected text before saving. At exit, Camera QR reads a ticket
-photo and Camera Plate fills the manual search field. Browser printing uses the
+and verify the detected text before saving. At exit, Scan ticket or plate reads a ticket QR or a number plate
+from the same live camera. Browser printing uses the
 OS print dialog. POS printer and camera behavior must be checked on the chosen
 hardware. Cash checkout requires an online connection. Razorpay is deferred.
 
