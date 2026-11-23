@@ -331,7 +331,7 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         {tg('cancelNeedsReason', 'Require a reason to cancel a ticket', 'Off: attendants can cancel without typing anything. Every cancel is still in the master audit.')}
       </div>
       <div className="card grid2">
-        {f('operator', 'Operator name (on slip)')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
+        {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
       </div>
       <button className="btn btn-primary" onClick={() => { saveStart(); try { saveSettings(me.id, s); saveEnd(true, 'Saved') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Save settings</button>
       <div className="card">

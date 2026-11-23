@@ -29,7 +29,7 @@ export default function App() {
       <header className={view === 'owner' ? 'hero' : 'hero compact'}>
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
-          <div className="brand"><span className="brand-mark"><Ico n="p" /></span>Parking</div>
+          <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
           <span className="demo-tag">DEMO · data in this browser</span>
         </div>
         <nav className="switch" aria-label="Choose screen">
