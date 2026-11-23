@@ -1,96 +1,203 @@
-import { callParking } from './parking-api'
-import { loginAlias, pairedPassword } from './parking-identity'
 import { useState, type FormEvent } from 'react'
+import { callParking } from './parking-api'
 import { auth, indianMobile } from './parking-auth'
+import { loginAlias, pairedPassword } from './parking-identity'
 import { Ico } from './ui'
+
+type Step = 'mobile' | 'credential' | 'recovery-code' | 'new-password' | 'owner-setup'
+type Workspace = 'pos' | 'owner'
+
+const copy = {
+  en: {
+    welcome: 'Welcome back', subtitle: 'Sign in with your mobile number', title: 'Sign in',
+    mobile: 'Mobile number', next: 'Next', change: 'Change number', pos: 'Gate POS', owner: 'Owner dashboard',
+    pin: 'Enter your PIN', password: 'Enter your password', delete: 'Delete last digit',
+    forget: 'Forgot password?', code: 'Recovery code', codeHelp: 'Enter the code issued for this mobile number.',
+    newPassword: 'Set Owner password', minimum: 'Use at least 10 characters.', confirm: 'Confirm password',
+    save: 'Set password', back: 'Back', working: 'Checking…', old: 'Use existing owner setup',
+    oldCode: 'Existing owner setup code', pairing: 'Sign in to pair this gate device.',
+    missingPair: 'Open the setup link from your Owner dashboard on this device first.',
+    failed: 'Sign-in failed. Check your number and credentials.', mismatch: 'The passwords do not match.',
+    saved: 'Password set. Sign in with your new password.', unavailable: 'Parking sign-in is unavailable.',
+  },
+  hi: {
+    welcome: 'फिर से स्वागत है', subtitle: 'अपने मोबाइल नंबर से साइन इन करें', title: 'साइन इन करें',
+    mobile: 'मोबाइल नंबर', next: 'आगे', change: 'नंबर बदलें', pos: 'गेट POS', owner: 'मालिक का डैशबोर्ड',
+    pin: 'अपना पिन डालें', password: 'अपना पासवर्ड डालें', delete: 'आखिरी अंक हटाएँ',
+    forget: 'पासवर्ड भूल गए?', code: 'रिकवरी कोड', codeHelp: 'इस मोबाइल नंबर के लिए जारी कोड डालें।',
+    newPassword: 'नया पासवर्ड बनाएँ', minimum: 'कम से कम 10 अक्षर रखें।', confirm: 'पासवर्ड दोबारा डालें',
+    save: 'पासवर्ड बनाएँ', back: 'पीछे', working: 'जाँच हो रही है…', old: 'मौजूदा मालिक सेटअप का उपयोग करें',
+    oldCode: 'मौजूदा मालिक सेटअप कोड', pairing: 'इस गेट डिवाइस को जोड़ने के लिए साइन इन करें।',
+    missingPair: 'पहले इस डिवाइस पर मालिक के डैशबोर्ड से मिला सेटअप लिंक खोलें।',
+    failed: 'साइन इन नहीं हुआ। अपना नंबर और पिन या पासवर्ड जाँचें।', mismatch: 'दोनों पासवर्ड एक जैसे नहीं हैं।',
+    saved: 'पासवर्ड बन गया। नए पासवर्ड से साइन इन करें।', unavailable: 'अभी पार्किंग साइन इन उपलब्ध नहीं है।',
+  },
+}
 
 export function Login({ onOwnerSetup, error }: {
   onOwnerSetup: (key: string) => Promise<void>
   error: string
 }) {
-  const [kind, setKind] = useState<'pos' | 'owner' | 'setup' | 'recover'>('pos')
+  const [step, setStep] = useState<Step>('mobile')
+  const [workspace, setWorkspace] = useState<Workspace>('pos')
+  const [language, setLanguage] = useState<'en' | 'hi'>('en')
   const [pairing, setPairing] = useState(() => /^#\/pair\/([a-f0-9]{64})$/.exec(location.hash)?.[1] ?? '')
   const [identifier, setIdentifier] = useState('')
   const [code, setCode] = useState('')
   const [notice, setNotice] = useState('')
   const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
+  const t = copy[language]
+  const validMobile = /^[6-9]\d{9}$/.test(identifier)
+  const pos = workspace === 'pos'
+  const validCredential = pos ? /^\d{4,8}$/.test(password) : password.length > 0
+  const validCode = /^[a-f0-9]{32}$/i.test(code.replace(/[\s-]/g, ''))
+
+  function go(next: Step) {
+    setStep(next)
+    setMessage('')
+    setNotice('')
+    setPassword('')
+    setConfirm('')
+    if (next !== 'new-password') setCode('')
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (busy) return
+    if (step === 'mobile') {
+      if (validMobile) go('credential')
+      return
+    }
+    if (step === 'recovery-code') {
+      if (validCode) go('new-password')
+      return
+    }
+    if (step === 'new-password' && password !== confirm) {
+      setMessage(t.mismatch)
+      return
+    }
+
     setBusy(true)
     setMessage('')
     setNotice('')
     try {
-      if (kind === 'setup') {
+      if (step === 'owner-setup') {
         await onOwnerSetup(password.trim())
         return
       }
-      if (!auth) throw new Error('Parking sign-in is unavailable.')
       const mobile = indianMobile(identifier)
-      if (kind === 'recover') {
+      if (step === 'new-password') {
         await callParking('redeemOwnerCode', [mobile, code, password], '')
-        setCode('')
-        setKind('owner')
-        setNotice('Password set. Sign in to the Owner dashboard.')
+        go('credential')
+        setNotice(t.saved)
         return
       }
+      if (!auth) throw new Error(t.unavailable)
       const storageKey = 'parking-pairing-' + mobile
       const pairingKey = pairing || localStorage.getItem(storageKey) || ''
-      if (kind === 'pos' && !pairingKey) throw new Error('Open the setup link from your Owner dashboard on this device first.')
-      const secret = kind === 'pos' ? await pairedPassword(password, pairingKey) : password
-      const { error } = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password: secret })
-      if (error) throw new Error(kind === 'pos' ? 'Sign-in failed. Check the mobile number, PIN, and setup link.' : 'Sign-in failed. Check the Owner mobile number and password.')
-      if (kind === 'pos' && pairing) {
+      if (pos && !pairingKey) throw new Error(t.missingPair)
+      const secret = pos ? await pairedPassword(password, pairingKey) : password
+      const result = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password: secret })
+      if (result.error) throw new Error(t.failed)
+      if (pos && pairing) {
         localStorage.setItem(storageKey, pairing)
         setPairing('')
         history.replaceState(null, '', location.pathname + location.search)
       }
     } catch (failure) {
       setMessage((failure as Error).message)
-    } finally {
       setPassword('')
+      setConfirm('')
+    } finally {
       setBusy(false)
     }
   }
 
-  function choose(next: typeof kind) {
-    setKind(next)
-    setIdentifier('')
-    setPassword('')
-    setCode('')
-    setNotice('')
-    setMessage('')
+  function updateMobile(input: string) {
+    const digits = input.replace(/\D/g, '')
+    setIdentifier((digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits).slice(0, 10))
   }
 
-  return <main className="screen">
-    <div className="content">
-      <form className="card stack device-setup" onSubmit={submit}>
-        <span className="brand-mark"><Ico n="p" /></span>
-        <div><h1>{kind === 'recover' ? 'Set Owner password' : 'Pay Parking'}</h1><p className="muted">{kind === 'recover' ? 'Enter the recovery code issued for your mobile number.' : kind === 'pos' ? 'Sign in to your gate POS.' : 'Sign in to the Owner dashboard.'}</p></div>
-        <div className="row2 login-tabs" aria-label="Choose sign-in">
-          <button type="button" className={`btn ${kind === 'pos' ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={kind === 'pos'} disabled={busy} onClick={() => choose('pos')}>Gate POS</button>
-          <button type="button" className={`btn ${kind !== 'pos' ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={kind !== 'pos'} disabled={busy} onClick={() => choose('owner')}>Owner dashboard</button>
-        </div>
-        {kind !== 'setup' && <label className="setf"><span className="lbl">{kind === 'pos' ? 'Mobile number' : 'Owner mobile number'}</span>
-          <input className="field" type="tel" autoComplete="username" value={identifier} onChange={event => setIdentifier(event.target.value)} required />
+  const title = step === 'mobile' ? t.title : step === 'recovery-code' ? t.code
+    : step === 'new-password' ? t.newPassword : step === 'owner-setup' ? t.old : pos ? t.pin : t.password
+
+  return <div className="screen parking-login" lang={language}>
+    <header className="hero">
+      <span className="glow g1" aria-hidden="true" /><span className="glow g2" aria-hidden="true" />
+      <div className="hero-row">
+        <span className="brand"><span className="brand-mark" aria-hidden="true"><Ico n="p" /></span>Pay Parking</span>
+        <button className="chip-btn login-lang" type="button" onClick={() => setLanguage(language === 'en' ? 'hi' : 'en')} aria-label={language === 'en' ? 'Switch to Hindi' : 'Switch to English'}>{language === 'en' ? 'हिन्दी' : 'English'}</button>
+      </div>
+      <h1>{t.welcome}</h1>
+      <p>{t.subtitle}</p>
+    </header>
+    <main className="content">
+      <form className="card stack login-card" onSubmit={submit}>
+        <h2>{title}</h2>
+        {step === 'mobile' && <>
+          <label className="setf" htmlFor="login-mobile"><span className="lbl">{t.mobile}</span>
+            <div className="login-prefix">
+              <span aria-hidden="true">+91</span>
+              <input id="login-mobile" className="field num" type="tel" inputMode="numeric" autoComplete="tel-national"
+                placeholder="98765 43210" value={identifier} onChange={event => updateMobile(event.target.value)} required />
+            </div>
+          </label>
+          <button className="btn btn-primary" disabled={!validMobile}>{t.next}</button>
+        </>}
+        {step === 'credential' && <fieldset className="login-workspaces" aria-label={t.title} disabled={busy}>
+          {(['pos', 'owner'] as const).map(item => <button key={item} type="button" aria-pressed={workspace === item}
+            onClick={() => { setWorkspace(item); go('credential') }}>{t[item]}</button>)}
+        </fieldset>}
+        {step !== 'mobile' && step !== 'owner-setup' && <div className="login-number">
+          <span className="num">+91 {identifier.slice(0, 5)} {identifier.slice(5)}</span>
+          <button className="link" type="button" disabled={busy} onClick={() => go('mobile')}>{t.change}</button>
+        </div>}
+        {step === 'credential' && pos && <div className="login-pin">
+          <div className="login-pin-entry">
+            <label className="lbl" htmlFor="login-pin">{t.pin}</label>
+            <input id="login-pin" className="field num" type="password" inputMode="numeric" autoComplete="current-password" maxLength={8}
+              value={password} onChange={event => setPassword(event.target.value.replace(/\D/g, '').slice(0, 8))} disabled={busy} required />
+          </div>
+          <div className="login-keypad">
+            {'123456789'.split('').map(digit => <button type="button" key={digit} disabled={busy || password.length >= 8}
+              onClick={() => setPassword(value => value + digit)}>{digit}</button>)}
+            <span aria-hidden="true" />
+            <button type="button" disabled={busy || password.length >= 8} onClick={() => setPassword(value => value + '0')}>0</button>
+            <button type="button" aria-label={t.delete} disabled={busy || !password} onClick={() => setPassword(value => value.slice(0, -1))}>⌫</button>
+          </div>
+          {pairing && <p className="muted small">{t.pairing}</p>}
+        </div>}
+        {step === 'recovery-code' && <>
+          <p className="muted small">{t.codeHelp}</p>
+          <label className="setf"><span className="lbl">{t.code}</span>
+            <input className="field" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code"
+              autoCapitalize="none" spellCheck={false} maxLength={48} required />
+          </label>
+        </>}
+        {(step === 'owner-setup' || step === 'new-password' || (step === 'credential' && !pos)) && <label className="setf">
+          <span className="lbl">{step === 'owner-setup' ? t.oldCode : step === 'new-password' ? t.newPassword : t.password}</span>
+          <input key={step} className="field" type="password" autoComplete={step === 'new-password' ? 'new-password' : step === 'owner-setup' ? 'off' : 'current-password'}
+            minLength={step === 'new-password' ? 10 : undefined} value={password} onChange={event => setPassword(event.target.value)} disabled={busy} required />
+          {step === 'new-password' && <small className="muted">{t.minimum}</small>}
         </label>}
-        {kind === 'recover' && <label className="setf"><span className="lbl">Recovery code</span>
-          <input className="field" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" autoCapitalize="none" spellCheck={false} required />
+        {step === 'new-password' && <label className="setf"><span className="lbl">{t.confirm}</span>
+          <input className="field" type="password" autoComplete="new-password" value={confirm} onChange={event => setConfirm(event.target.value)} disabled={busy} required />
         </label>}
-        <label className="setf"><span className="lbl">{kind === 'recover' ? 'New password · at least 10 characters' : kind === 'pos' ? 'PIN' : kind === 'owner' ? 'Password' : 'Existing owner setup code'}</span>
-          <input className="field" type="password" autoComplete={kind === 'recover' ? 'new-password' : kind === 'setup' ? 'off' : 'current-password'} minLength={kind === 'recover' ? 10 : undefined} inputMode={kind === 'pos' ? 'numeric' : undefined} value={password} onChange={event => setPassword(event.target.value)} required />
-        </label>
-        <button className="btn btn-primary" disabled={busy}>{busy ? 'Connecting…' : kind === 'recover' ? 'Set password' : 'Sign in'}</button>
-        {kind === 'pos' && pairing && <p className="small muted">This setup link will pair the device after a successful sign-in.</p>}
-        {kind === 'owner' && <button type="button" className="link" disabled={busy} onClick={() => choose('recover')}>Forgot password?</button>}
-        {kind === 'recover' && <button type="button" className="link" disabled={busy} onClick={() => choose('owner')}>Back to Owner sign-in</button>}
-        {kind === 'owner' && <button type="button" className="link" disabled={busy} onClick={() => choose('setup')}>Use existing owner setup</button>}
-        {kind === 'setup' && <button type="button" className="link" disabled={busy} onClick={() => choose('owner')}>Use mobile number instead</button>}
-        {notice && <p role="status">{notice}</p>}
-        {(message || error) && <p role="alert">{message || error}</p>}
+        {step !== 'mobile' && <button className="btn btn-primary" disabled={busy || (step === 'credential' ? !validCredential
+          : step === 'recovery-code' ? !validCode : step === 'new-password' ? password.length < 10 || !confirm : !password.trim())}>
+          {busy ? t.working : step === 'recovery-code' ? t.next : step === 'new-password' ? t.save : t.title}
+        </button>}
+        {step === 'credential' && !pos && <button type="button" className="link" disabled={busy} onClick={() => go('recovery-code')}>{t.forget}</button>}
+        {step === 'mobile' && !pairing && <button type="button" className="link" onClick={() => go('owner-setup')}>{t.old}</button>}
+        {(step === 'owner-setup' || step === 'recovery-code' || step === 'new-password') && <button type="button" className="link" disabled={busy}
+          onClick={() => go(step === 'owner-setup' ? 'mobile' : step === 'new-password' ? 'recovery-code' : 'credential')}>{t.back}</button>}
+        {notice && <p className="msg ok" role="status">{notice}</p>}
+        {(message || error) && <p className="msg bad" role="alert">{message || error}</p>}
       </form>
-    </div>
-  </main>
+    </main>
+  </div>
 }

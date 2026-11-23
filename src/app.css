@@ -346,14 +346,30 @@ html,body{background:var(--color-bg-page)}
 .payment-option { display: flex; align-items: center; gap: .55rem; min-height: 48px; padding: .65rem; border-radius: .75rem; border: 1px solid var(--color-border-input); font-weight: 700; cursor: pointer; }
 .payment-option:has(input:checked) { background: var(--color-accent-subtle); border-color: var(--color-accent-solid); }
 .payment-option input { flex: none; accent-color: var(--color-accent-solid); }
-.device-setup { max-width: 28rem; margin: 8vh auto 0; }
 .device-list { margin: 0; padding: 0; list-style: none; }
 .device-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; padding: .85rem 0; border-top: 1px solid var(--color-border); }
 .device-list li > div:first-child { min-width: 9rem; flex: 1; }
 
 .signout { cursor: pointer; color: inherit; font: inherit; background: transparent; }
-.login-tabs .btn { min-height: 46px; }
 
 .account-form { border: 1px solid var(--color-border); border-radius: .9rem; padding: 1rem; }
 .account-form h3 { margin: 0; }
 .owner-code { overflow-wrap: anywhere; font-size: 1rem; }
+
+.parking-login .login-card { gap: 12px; }
+.login-card h2, .login-card p { margin: 0; }
+.login-card .link { align-self: center; }
+.login-prefix { display: flex; align-items: center; gap: 10px; }
+.login-prefix span { font-size: 18px; font-weight: 750; color: var(--color-text-secondary); }
+.login-lang { min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; cursor: pointer; color: inherit; background: rgb(255 255 255 / 13%); }
+.login-workspaces { display: flex; gap: 5px; padding: 4px; margin: 0; border: 0; border-radius: 14px; background: var(--color-bg-subtle); min-inline-size: 0; }
+.login-workspaces button { flex: 1; min-height: 44px; padding: 4px 8px; border: 0; border-radius: 11px; background: transparent; color: var(--color-text-secondary); font-weight: 650; cursor: pointer; }
+.login-workspaces button[aria-pressed="true"] { background: var(--color-bg-surface); color: var(--color-text); box-shadow: var(--shadow-sm); }
+.login-number { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; font-size: 14px; color: var(--color-text-secondary); }
+.login-pin-entry { max-width: 12rem; margin-inline: auto; text-align: center; }
+.login-pin-entry input { text-align: center; letter-spacing: .24em; }
+.login-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.login-keypad button { min-height: 54px; border: 0; border-radius: 14px; background: var(--color-bg-subtle); font-size: 22px; font-weight: 750; cursor: pointer; }
+.login-keypad button:active { background: var(--color-accent-subtle); }
+.login-keypad button:disabled { opacity: .5; cursor: default; }
+.login-pin .small { margin-top: 10px; }
