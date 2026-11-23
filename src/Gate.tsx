@@ -1,4 +1,6 @@
-import { readPlate, readQr } from './scan'
+import { readQr } from './scan'
+import { PlateScanner } from './PlateScanner'
+import { differsByOneConfusableCharacter } from './plate-reading'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useRef, useState } from 'react'
 import {
@@ -67,7 +69,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const [busy, setBusy] = useState(false)
   const [printFail, setPrintFail] = useState(false)
   const [scanning, setScanning] = useState(false)
-  const camera = useRef<HTMLInputElement>(null)
+  const [alternatives, setAlternatives] = useState<string[]>([])
   const inp = useRef<HTMLInputElement>(null)
   const chk = plate ? checkPlate(plate) : null
   const already = plate.length >= 4 ? findActiveByPlate(db, plate) : undefined
@@ -76,17 +78,6 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const rate = tv.rates[cat]
   const advance = prepaid && rate ? prepaidPrice(hours, rate) : 0
 
-  const scan = async (file?: File) => {
-    if (!file) return
-    setScanning(true)
-    try {
-      const result = await readPlate(file)
-      setPlate(result.plate)
-      setConf(result.confidence)
-      toast('Check the scanned registration before saving.')
-    } catch (error) { toast((error as Error).message, true) }
-    finally { setScanning(false); inp.current?.focus() }
-  }
   const confirm = async () => {
     if (busy) return // one tap only
     setBusy(true)
@@ -106,7 +97,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       toast((error as Error).message, true)
     }
   }
-  const next = () => { setDone(null); setPlate(''); setConf(null); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
+  const next = () => { setDone(null); setPlate(''); setConf(null); setAlternatives([]); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
 
   if (done) {
     const t = db.tickets.find(x => x.id === done.t.id) ?? done.t
@@ -128,17 +119,26 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   return (
     <div className="stack">
       <div className="card">
-        <button className="btn btn-primary btn-xl" onClick={() => camera.current?.click()} disabled={scanning}><Ico n="scan" size={26} /> {scanning ? 'Reading plate…' : 'Scan Plate'}</button>
-        <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={event => { void scan(event.target.files?.[0]); event.target.value = '' }} />
-        <p className="tiny muted center">Photograph the plate close up, or type the number.</p>
+        <button className="btn btn-primary btn-xl" onClick={() => setScanning(true)}><Ico n="scan" size={26} /> Scan plate</button>
+        {scanning && <PlateScanner onClose={() => setScanning(false)} onRead={result => {
+          setScanning(false)
+          setPlate(result.plate)
+          setConf(result.confidence)
+          setAlternatives(result.alternatives)
+        }} />}
+        <p className="tiny muted center">Point the live camera at the plate or type the number.</p>
         <label className="lbl" htmlFor="plate">Vehicle number</label>
         <input id="plate" ref={inp} className="field plate-field" value={plate} autoFocus inputMode="text" autoCapitalize="characters" autoComplete="off"
-          placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null) }} />
+          placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
         {chk && <div className="plate-meta">
           {chk.kind !== 'unknown' ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">{chk.hint}</Pill>}
-          {conf !== null && <Pill tone={conf < 0.8 ? 'warn' : 'info'}>Scan {Math.round(conf * 100)}% sure</Pill>}
+          {conf !== null && <Pill tone="warn">Check the scanned plate</Pill>}
         </div>}
         {chk?.suggestion && <button className="btn btn-ghost sug" onClick={() => { setPlate(chk.suggestion!); setConf(null) }}>Use {prettyPlate(chk.suggestion)}</button>}
+        {conf !== null && /[VY]/.test(plate) && <p className="tiny muted">Check V and Y against the plate.</p>}
+        {alternatives.length > 0 && <div className="chips" aria-label="Other camera readings">{alternatives.map(value =>
+          <button key={value} className="chip" onClick={() => { setPlate(value); setAlternatives([]) }}>Try {prettyPlate(value)}</button>
+        )}</div>}
         {already && <div className="banner banner-warn"><Ico n="warn" /><div>This vehicle is already inside (ticket {already.id}, {fmtTime(already.entryAt)}). Confirming will show that ticket instead of making a new one.</div></div>}
       </div>
       <div className="card">
@@ -180,6 +180,9 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [q, setQ] = useState('')
   const [reading, setReading] = useState(false)
+  const [scanningPlate, setScanningPlate] = useState(false)
+  const [scannedPlate, setScannedPlate] = useState(false)
+  const [plateAlternatives, setPlateAlternatives] = useState<string[]>([])
   const [id, setId] = useState<string | null>(null)
   const [pick, setPick] = useState<Ticket[] | null>(null)
   const [confirmLost, setConfirmLost] = useState(false)
@@ -208,23 +211,24 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     const n = normPlate(s)
     if (n.length < 2) return toast('Enter a vehicle number or its last 4 digits.', true)
     const exact = active.find(y => y.plate === n)
+    const confused = active.filter(ticket => differsByOneConfusableCharacter(n, ticket.plate) || (scannedPlate && plateAlternatives.includes(ticket.plate)))
+    if (scannedPlate && exact && confused.length) { setPick([exact, ...confused]); return }
     if (exact) return open(exact, 'plate')
-    const near = active.filter(y => y.plate.includes(n) || n.includes(y.plate.slice(-4)) || y.plate.slice(-4) === n.slice(-4))
+    const near = active.filter(y => confused.includes(y) || y.plate.includes(n) || n.includes(y.plate.slice(-4)) || y.plate.slice(-4) === n.slice(-4))
     if (!near.length) return toast('No vehicle inside matches. Try the last 4 digits.', true)
     setPick(near)
   }
-  const scanExit = async (kind: 'qr' | 'plate', file?: File) => {
+  const scanQr = async (file?: File) => {
     if (!file) return
     setReading(true)
     try {
-      const value = kind === 'qr' ? await readQr(file) : (await readPlate(file)).plate
+      const value = await readQr(file)
       setQ(value)
-      if (kind === 'qr') find(kind, value)
-      else toast('Check the scanned registration, then tap Plate.')
+      find('qr', value)
     } catch (error) { toast((error as Error).message, true) }
     finally { setReading(false) }
   }
-  const reset = () => { setId(null); setQ(''); setPick(null); setCancelling(false); setReason('') }
+  const reset = () => { setId(null); setQ(''); setScannedPlate(false); setPlateAlternatives([]); setPick(null); setCancelling(false); setReason('') }
 
   if (t) {
     const b = billFor(db, t, now)
@@ -284,20 +288,28 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     <div className="stack">
       <div className="card">
         <label className="lbl" htmlFor="q">Scan the slip QR, or enter plate / ticket number</label>
-        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => { setQ(e.target.value); setPick(null) }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
+        <input id="q" className="field plate-field" value={q} autoFocus autoComplete="off" placeholder="MH12AB1234 or T-000123" onChange={e => { setQ(e.target.value); setPick(null); setScannedPlate(false); setPlateAlternatives([]) }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
         <div className="row2">
           <button className="btn btn-ghost" onClick={() => find('qr')}><Ico n="qr" /> Ticket / QR</button>
           <button className="btn btn-primary" onClick={() => find('plate')}><Ico n="search" /> Plate</button>
         </div>
         <div className="row2">
-          <label className="btn btn-ghost"><Ico n="qr" /> Camera QR<input type="file" accept="image/*" capture="environment" className="scan-input" aria-label="Camera QR" disabled={reading} onChange={event => { void scanExit('qr', event.target.files?.[0]); event.target.value = '' }} /></label>
-          <label className="btn btn-ghost"><Ico n="scan" /> Camera plate<input type="file" accept="image/*" capture="environment" className="scan-input" aria-label="Camera plate" disabled={reading} onChange={event => { void scanExit('plate', event.target.files?.[0]); event.target.value = '' }} /></label>
+          <label className="btn btn-ghost"><Ico n="qr" /> Camera QR<input type="file" accept="image/*" capture="environment" className="scan-input" aria-label="Camera QR" disabled={reading} onChange={event => { void scanQr(event.target.files?.[0]); event.target.value = '' }} /></label>
+          <button className="btn btn-ghost" onClick={() => setScanningPlate(true)} disabled={reading}><Ico n="scan" /> Scan plate live</button>
         </div>
+        {scanningPlate && <PlateScanner onClose={() => setScanningPlate(false)} onRead={result => {
+          setScanningPlate(false)
+          setQ(result.plate)
+          setPick(null)
+          setScannedPlate(true)
+          setPlateAlternatives(result.alternatives)
+        }} />}
+        {scannedPlate && <p className="small muted">Check the registration against the plate, then tap Plate.{/[VY]/.test(q) && ' Check V and Y carefully.'}</p>}
         {reading && <p role="status">Reading camera image…</p>}
         <p className="tiny muted">Use a QR scanner that types into this field and sends Enter, or enter a plate or ticket number manually.</p>
       </div>
       {pick && <div className="card">
-        <h2>Which vehicle?</h2><p className="muted small">No exact match. Pick the right one and check it.</p>
+        <h2>Which vehicle?</h2><p className="muted small">Compare the number plate before opening a ticket.</p>
         {pick.map(x => <button key={x.id} className="listrow" onClick={() => open(x, 'search')}><b>{prettyPlate(x.plate)}</b><span>{db.categories.find(c => c.id === x.category)?.name} · in {fmtTime(x.entryAt)}</span></button>)}
       </div>}
       <div className="card">

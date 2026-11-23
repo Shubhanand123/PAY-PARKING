@@ -1,0 +1,9 @@
+Pay Parking indplate OCR model
+Base model: Tesseract tessdata_best English LSTM.
+Upstream: https://github.com/tesseract-ocr/tessdata_best
+License: Apache License, Version 2.0. See LICENSE.
+
+Modified for Pay Parking: fine-tuned on generated Indian state and Bharat-series
+registration text rendered in Nimbus Sans, Liberation Sans and DejaVu Sans Mono.
+The fonts approximate plate lettering. No official font or street images were
+included. The model was quantized and general-purpose dictionaries removed.

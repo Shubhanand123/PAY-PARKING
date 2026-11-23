@@ -64,3 +64,24 @@ Deactivation disables access from the Owner dashboard.
 The UI uses mobile numbers as the sign-in identifier. Supabase Auth receives
 an internal email alias because SMS authentication is disabled on the project.
 The publishable key in the production configuration is safe for client use.
+
+### Live plate scanning
+
+The entry and exit plate buttons scan live video frames inside the camera guide.
+Three agreeing high-confidence frames can fill the editable plate field. Smaller
+or conflicting readings can be reviewed manually. Similar active records at
+exit are presented for operator confirmation. Camera frames stay in the browser
+and are not retained by the scanner.
+
+The browser loads the fine-tuned model from `public/ocr`. The starter model
+and model modifications are documented in its NOTICE. The first training set
+used 500 synthetic crops emphasizing Goa, Bharat series, and V/Y letter pairs.
+A separate set of 120 synthetic crops used a fourth font absent from training.
+The packaged model read 119/120 full plates and 47/47 containing V or Y. The
+previous browser model read 111/120 and 43/47 respectively on the same crops.
+These tests do not measure accuracy on road footage. Retraining should use
+permissioned, transcribed crops from the actual gate, with separate test vehicles
+and capture sessions. Include motorcycles with two-line plates, commercial and
+EV plates, glare, blur, distance and nighttime captures. A compatible model
+can be served by setting `VITE_PLATE_OCR_MODEL_PATH` to the directory containing
+`indplate.traineddata.gz`.
