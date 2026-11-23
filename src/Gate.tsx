@@ -62,6 +62,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const [conf, setConf] = useState<number | null>(null)
   const [cat, setCat] = useState('')
   const [hours, setHours] = useState(1)
+  const [paymentTiming, setPaymentTiming] = useState<'before' | 'exit'>('exit')
   const [done, setDone] = useState<{ t: Ticket; dup: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [printFail, setPrintFail] = useState(false)
@@ -69,8 +70,11 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const camera = useRef<HTMLInputElement>(null)
   const inp = useRef<HTMLInputElement>(null)
   const chk = plate ? checkPlate(plate) : null
-  const already = plate.length >= 6 ? findActiveByPlate(db, plate) : undefined
+  const already = plate.length >= 4 ? findActiveByPlate(db, plate) : undefined
   const tv = activeTariff(db)
+  const prepaid = db.settings.payAtEntry && paymentTiming === 'before' && !already
+  const rate = tv.rates[cat]
+  const advance = prepaid && rate ? prepaidPrice(hours, rate) : 0
 
   const scan = async (file?: File) => {
     if (!file) return
@@ -88,7 +92,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
     setBusy(true)
     try {
       const note = chk && chk.kind === 'unknown' ? 'unusual format, operator confirmed' : conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
-      const r = await createEntry(me.id, plate, cat, db.settings.payAtEntry ? hours : 0, note)
+      const r = await createEntry(me.id, plate, cat || already?.category || '', prepaid ? hours : 0, note, advance)
       setDone({ t: r.ticket, dup: r.duplicate })
       if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
@@ -102,7 +106,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       toast((error as Error).message, true)
     }
   }
-  const next = () => { setDone(null); setPlate(''); setConf(null); setCat(''); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
+  const next = () => { setDone(null); setPlate(''); setConf(null); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
 
   if (done) {
     const t = db.tickets.find(x => x.id === done.t.id) ?? done.t
@@ -110,11 +114,11 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       <div className="stack">
         {done.dup
           ? <div className="banner banner-warn"><Ico n="warn" /> <div><b>Already inside.</b> {prettyPlate(t.plate)} came in at {fmtTime(t.entryAt)}. No new ticket was made. You can reprint this one.</div></div>
-          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'Print failed. Use Reprint below.' : 'Slip ready to print.'}</div></div>}
+          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'The print request was not logged. You can try again.' : 'Slip ready to print.'}</div></div>}
         <Slip db={db} t={t} />
         <div className="row2">
-          <button className="btn btn-ghost" onClick={() => { window.print(); void print(t) }}><Ico n="print" /> {printFail ? 'Retry print' : 'Reprint'}</button>
-          <button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" /> Save · Next vehicle</button>
+          <button className="btn btn-ghost" onClick={() => { window.print(); void print(t) }}><Ico n="print" /> {printFail ? 'Retry print' : t.prints > 0 ? 'Reprint slip' : 'Print slip'}</button>
+          <button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" /> Next vehicle</button>
         </div>
 
       </div>
@@ -147,15 +151,26 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
           ))}
         </div>
       </div>
-      {db.settings.payAtEntry && cat && (
-        <div className="card">
-          <span className="lbl">Pay at entry: how long will they stay?</span>
-          <div className="chips">{[1, 2, 3, 4, 6, 8, 12, 24].map(h => <button key={h} className={'chip' + (hours === h ? ' on' : '')} onClick={() => setHours(h)}>{h}h</button>)}</div>
-          <div className="due">Collect now <b>{rupees(prepaidPrice(hours, tv.rates[cat]))}</b> cash</div>
-        </div>
+      {db.settings.payAtEntry && !already && (
+        <fieldset className="card payment-choice">
+          <legend className="lbl">When will they pay?</legend>
+          <div className="row2">
+            <label className="payment-option"><input type="radio" name="payment-timing" checked={paymentTiming === 'exit'} onChange={() => setPaymentTiming('exit')} /><span>Pay at exit</span></label>
+            <label className="payment-option"><input type="radio" name="payment-timing" checked={paymentTiming === 'before'} onChange={() => setPaymentTiming('before')} /><span>Pay before parking</span></label>
+          </div>
+          {prepaid && <div className="stack">
+            <div>
+              <span className="lbl">Prepaid hours</span>
+              <div className="chips">{[1, 2, 3, 4, 6, 8, 12, 24].map(h => <button key={h} className={'chip' + (hours === h ? ' on' : '')} aria-pressed={hours === h} onClick={() => setHours(h)}>{h}h</button>)}</div>
+            </div>
+            {rate ? <div className="due"><span>Cash to collect</span><b>{rupees(advance)}</b></div> : <p className="muted small">Select a vehicle type to see the advance amount.</p>}
+            <p className="tiny muted">Any extra time is charged at exit.</p>
+          </div>}
+        </fieldset>
       )}
-      <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={!plate || plate.length < 4 || !cat || busy} onClick={confirm}>
-        {!plate || plate.length < 4 ? <>Enter vehicle number</> : !cat ? <>Pick vehicle type</> : <><Ico n="print" size={24} /> {db.settings.payAtEntry ? 'Cash received · Print slip' : 'Confirm · Print slip'}</>}
+      <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={plate.length < 4 || (!cat && !already) || busy || scanning} onClick={confirm}>
+        <Ico n={already ? 'search' : 'check'} size={24} />
+        {busy ? 'Saving…' : already ? 'Open existing ticket' : prepaid && advance > 0 ? `Record ${rupees(advance)} cash & save` : 'Save entry'}
       </button></div>
     </div>
   )

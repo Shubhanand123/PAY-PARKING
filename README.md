@@ -40,3 +40,25 @@ and verify the detected text before saving. At exit, Camera QR reads a ticket
 photo and Camera Plate fills the manual search field. Browser printing uses the
 OS print dialog. POS printer and camera behavior must be checked on the chosen
 hardware. Cash checkout requires an online connection. Razorpay is deferred.
+
+### Owner and gate sign-in
+
+Owner and POS accounts open separate workspaces. To switch to mobile sign-in
+for the first Owner, choose Owner dashboard → Use existing owner setup. Open
+Devices → Owner access and generate a code for the intended Owner mobile
+number. In a signed-out browser, choose Owner dashboard → Forgot password,
+enter that mobile and code, and create a password. Codes are valid for 30
+minutes and can be used once. Generating another code for a mobile number
+replaces the previous unused code. Password recovery invalidates older Owner
+sessions. Creating an additional Owner leaves existing Owner accounts active.
+
+In Owner → Devices, create a POS account with an Indian mobile number, a PIN
+and its gate role. Open the private setup link or scan the setup QR on the gate
+device, then sign in using that mobile number and PIN. Subsequent sign-ins use
+the same number and PIN in that browser. Keep the private pairing link safe
+for device setup. Deactivating a POS account disables access at all its paired
+devices. Existing gate setup credentials can be retired in the same dashboard.
+
+The UI uses mobile numbers as the sign-in identifier. Supabase Auth receives
+an internal email alias because SMS authentication is disabled on the project.
+The publishable key in the production configuration is safe for client use.

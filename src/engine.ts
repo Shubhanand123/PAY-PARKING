@@ -274,19 +274,22 @@ const log = (db: DB, s: Staff, kind: AuditKind, text: string, ticketId?: string,
 export const findActiveByPlate = (db: DB, plate: string) => db.tickets.find(t => t.plate === normPlate(plate) && (t.status === 'inside' || t.status === 'paid'))
 
 /** Create the entry. If the plate is already inside, return that ticket instead of making a second one. */
-export const createEntry = (db: DB, s: Staff, plate: string, category: string, prepaidHours: number, plateNote?: string) => {
+export const createEntry = (db: DB, s: Staff, plate: string, category: string, prepaidHours: number, plateNote?: string, expectedPrepaidPaise?: number | null) => {
   const normalized = normPlate(plate)
   if (normalized.length < 4 || normalized.length > 20) throw new Refused('Check the vehicle number.')
-  if (!db.categories.some(item => item.id === category && item.active) || !Object.hasOwn(activeTariff(db).rates, category)) throw new Refused('Select an available vehicle type.')
-  if (!Number.isInteger(prepaidHours) || prepaidHours < 0 || prepaidHours > 24 || db.settings.payAtEntry !== (prepaidHours > 0)) throw new Refused('Check the prepaid hours and payment settings.')
   const existing = findActiveByPlate(db, normalized)
   if (existing) { log(db, s, 'duplicate_blocked', `Second entry blocked for ${prettyPlate(plate)}; existing ticket shown`, existing.id); return { ticket: existing, duplicate: true } }
-  const t = newTicket(db, plate, category, s.id, Date.now(), prepaidHours)
+  if (!db.categories.some(item => item.id === category && item.active) || !Object.hasOwn(activeTariff(db).rates, category)) throw new Refused('Select an available vehicle type.')
+  if (!Number.isInteger(prepaidHours) || prepaidHours < 0 || prepaidHours > 24 || (!db.settings.payAtEntry && prepaidHours > 0)) throw new Refused('Check the prepaid hours and payment settings.')
+  const now = Date.now()
+  const advance = prepaidHours ? prepaidPrice(prepaidHours, activeTariff(db, now).rates[category]) : 0
+  if (expectedPrepaidPaise != null && advance !== expectedPrepaidPaise) throw new Refused('The advance amount changed. Check the updated amount before saving.')
+  const t = newTicket(db, plate, category, s.id, now, prepaidHours)
+  t.entryBy = s.name
   log(db, s, 'entry', `Entry ${prettyPlate(t.plate)} · ${db.categories.find(c => c.id === category)?.name}${plateNote ? ` · plate confirmed: ${plateNote}` : ''}`, t.id)
   if (prepaidHours) {
-    const tv = db.tariffs.find(x => x.id === t.tariffId)!
-    const amt = prepaidPrice(prepaidHours, tv.rates[category])
-    addPayment(db, t, amt, s.id, Date.now(), 'prepaid')
+    const amt = advance
+    addPayment(db, t, amt, s.id, now, 'prepaid').by = s.name
     log(db, s, 'payment', `Cash ${rupees(amt)} at entry for ${prepaidHours}h`, t.id, amt)
   }
   return { ticket: t, duplicate: false }
@@ -324,7 +327,7 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
   const now = Date.now()
   const b = billFor(db, t, now)
   if (b.duePaise !== expectedPaise) throw new Refused(`Amount changed to ${rupees(b.duePaise)} (time moved on). Check and try again.`)
-  if (b.duePaise) addPayment(db, t, b.duePaise, s.id, now, 'exit')
+  if (b.duePaise) addPayment(db, t, b.duePaise, s.id, now, 'exit').by = s.name
   t.status = 'paid'; t.billedAt = now; t.totalPaise = b.totalPaise; t.rev++
   log(db, s, 'payment', b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
   return t

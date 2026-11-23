@@ -1,18 +1,21 @@
+import { indianMobile } from './parking-auth'
+import { apiEnabled, callParking } from './parking-api'
 import { publishTariff, saveSettings } from './actions'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
-import { Ico, Pill, useNow } from './ui'
+import { Ico, Pill, QR, useNow } from './ui'
 import { Slip, StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
 
-type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings'
+type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings' | 'devices'
 
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
   const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
+  if (apiEnabled) tabs.push(['devices', 'Devices', 'gear'])
   return (
     <div className="owner">
       <nav className="tabs" aria-label="Owner sections">
@@ -22,6 +25,7 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       {tab === 'tickets' && <Tickets db={db} />}
       {tab === 'audit' && <AuditLog db={db} />}
       {tab === 'rates' && <Rates db={db} me={me} toast={toast} />}
+      {tab === 'devices' && <div className="stack"><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /><DevicesTab toast={toast} /></div>}
       {tab === 'settings' && <SettingsTab db={db} me={me} toast={toast} />}
     </div>
   )
@@ -322,20 +326,244 @@ function Rates({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: 
 // ---------- settings ----------
 function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [s, setS] = useState<Settings>(db.settings)
+  const [saving, setSaving] = useState(false)
+  const changed = Object.keys(s).some(k => s[k as keyof Settings] !== db.settings[k as keyof Settings])
   const f = (k: keyof Settings, label: string, type = 'text') => <label className="setf"><span className="lbl">{label}</span><input className="field small-field" type={type} value={String(s[k])} onChange={e => setS({ ...s, [k]: type === 'number' ? Number(e.target.value) : e.target.value })} /></label>
   const tg = (k: 'payAtEntry' | 'cancelNeedsReason', label: string, help: string) => <label className="toggle"><input type="checkbox" checked={s[k]} onChange={e => setS({ ...s, [k]: e.target.checked })} /><span className="tg-ui" /><span><b>{label}</b><br /><span className="muted small">{help}</span></span></label>
   return (
     <div className="stack">
       <div className="card">
         <h2>How the gates work</h2>
-        {tg('payAtEntry', 'Pay at entry', 'Customer chooses hours and pays cash at entry. Leaving early costs the same; extra time is charged at exit.')}
+        {tg('payAtEntry', 'Allow cash before parking', 'After saving, the Entry gate offers Pay before parking or Pay at exit for each vehicle.')}
         {tg('cancelNeedsReason', 'Require a reason to cancel a ticket', 'Off: attendants can cancel without typing anything. Every cancel is still in the master audit.')}
       </div>
       <div className="card grid2">
         {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
       </div>
-      <button className="btn btn-primary" onClick={async () => { saveStart(); try { await saveSettings(me.id, s); saveEnd(true, 'Saved') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Save settings</button>
-
+      <button className="btn btn-primary" disabled={!changed || saving} onClick={async () => {
+        setSaving(true)
+        saveStart()
+        try {
+          await saveSettings(me.id, s)
+          saveEnd(true, 'Saved')
+          toast('Parking settings saved')
+        } catch (error) {
+          saveEnd(false, '')
+          toast((error as Error).message, true)
+        } finally {
+          setSaving(false)
+        }
+      }}>{saving ? 'Saving…' : 'Save settings'}</button>
     </div>
   )
+}
+
+type ParkingDevice = {
+  id: string
+  label: string
+  role: 'owner' | 'entry' | 'exit'
+  enabled: boolean
+  current: boolean
+}
+
+function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [devices, setDevices] = useState<ParkingDevice[]>()
+  const [selected, setSelected] = useState<ParkingDevice>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    void callParking<ParkingDevice[]>('listDevices').then(response => {
+      if (active) { setDevices(response.result); setError('') }
+    }).catch((failure: Error) => { if (active) setError(failure.message) })
+    return () => { active = false }
+  }, [refresh])
+
+  async function deactivate(device: ParkingDevice) {
+    setBusy(true)
+    try {
+      await callParking('deactivateDevice', [device.id])
+      setDevices(current => current?.map(item => item.id === device.id ? { ...item, enabled: false } : item))
+      setSelected(undefined)
+      toast(`${device.label} deactivated`)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="devices-title">
+    <h2 id="devices-title">Parking devices</h2>
+    <p className="muted small">Deactivate a lost or unused gate device here. Its current setup code will stop working.</p>
+    {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
+      : !devices ? <p role="status">Loading devices…</p>
+      : devices.length === 0 ? <p>No devices have been registered.</p>
+      : <ul className="device-list">{devices.map(device => <li key={device.id}>
+        <div><b>{device.label}</b><div className="muted small">{device.role === 'owner' ? 'Owner' : device.role === 'entry' ? 'Entry gate' : 'Exit gate'}{device.current ? ' · This browser' : ''}</div></div>
+        <Pill tone={device.enabled ? 'ok' : 'warn'}>{device.enabled ? 'Active' : 'Inactive'}</Pill>
+        {device.enabled && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>Deactivate</button>}
+      </li>)}</ul>}
+    {selected && <div className="banner banner-warn" role="group" aria-label="Confirm deactivation">
+      <div className="stack">
+        <p>Deactivate <b>{selected.label}</b>? This device will lose gate access.</p>
+        <div className="row2">
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(undefined)}>Keep active</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Deactivating…' : 'Deactivate device'}</button>
+        </div>
+      </div>
+    </div>}
+  </section>
+}
+
+type PosAccount = {
+  id: string
+  label: string
+  mobile: string
+  role: 'entry' | 'exit'
+  enabled: boolean
+}
+
+function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [accounts, setAccounts] = useState<PosAccount[]>()
+  const [showForm, setShowForm] = useState(false)
+  const [label, setLabel] = useState('')
+  const [mobile, setMobile] = useState('')
+  const [passcode, setPasscode] = useState('')
+  const [gate, setGate] = useState<'entry' | 'exit'>('entry')
+  const [pairLink, setPairLink] = useState('')
+  const [selected, setSelected] = useState<PosAccount>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
+
+  useEffect(() => {
+    let current = true
+    void callParking<PosAccount[]>('listAccounts').then(response => {
+      if (current) { setAccounts(response.result); setError('') }
+    }).catch((failure: Error) => { if (current) setError(failure.message) })
+    return () => { current = false }
+  }, [refresh])
+
+  function openForm() {
+    setShowForm(true)
+    setLabel('')
+    setMobile('')
+    setPasscode('')
+    setPairLink('')
+  }
+
+  async function create(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const response = await callParking<{ pairingKey: string }>('createPosAccount', [indianMobile(mobile), passcode, gate, label.trim()])
+      setPairLink(location.origin + location.pathname + '#/pair/' + response.result.pairingKey)
+      toast('POS account created')
+      setShowForm(false)
+      setRefresh(n => n + 1)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setPasscode(''); setBusy(false) }
+  }
+
+  async function deactivate(account: PosAccount) {
+    setBusy(true)
+    try {
+      await callParking('disablePosAccount', [account.id])
+      setAccounts(current => current?.map(item => item.id === account.id ? { ...item, enabled: false } : item))
+      setSelected(undefined)
+      toast(`${account.label} deactivated`)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="pos-accounts-title">
+    <h2 id="pos-accounts-title">POS accounts</h2>
+    <button className="btn btn-primary fit" disabled={busy} onClick={openForm}>Create POS account</button>
+    {showForm && <form className="stack account-form" onSubmit={create}>
+      <h3>New POS account</h3>
+      <label className="setf"><span className="lbl">Operator or gate name</span>
+        <input className="field small-field" value={label} onChange={event => setLabel(event.target.value)} maxLength={80} required />
+      </label>
+      <label className="setf"><span className="lbl">Mobile number</span>
+        <input className="field small-field" type="tel" autoComplete="off" value={mobile} onChange={event => setMobile(event.target.value)} required />
+      </label>
+      <label className="setf"><span className="lbl">Gate access</span>
+        <select className="field small-field" value={gate} onChange={event => setGate(event.target.value === 'exit' ? 'exit' : 'entry')}><option value="entry">Entry POS</option><option value="exit">Exit POS</option></select>
+      </label>
+      <label className="setf"><span className="lbl">PIN · 4 to 8 digits</span>
+        <input className="field small-field" type="password" inputMode="numeric" autoComplete="new-password"
+          pattern="[0-9]{4,8}" minLength={4} maxLength={8}
+          value={passcode} onChange={event => setPasscode(event.target.value)} required />
+      </label>
+      <div className="row2"><button className="btn btn-ghost" type="button" onClick={() => { setShowForm(false); setPasscode('') }} disabled={busy}>Cancel</button><button className="btn btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button></div>
+    </form>}
+    {pairLink && <div className="stack account-form">
+      <h3>Pair the gate device</h3>
+      <p className="muted small">Scan this QR or open the private setup link on the gate device. Sign in there with the POS mobile number and PIN. Copy the link now so you can set up the device later.</p>
+      <QR text={pairLink} size={160} />
+      <div className="row2">
+        <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(pairLink).then(() => toast('Private setup link copied'), () => toast('Could not copy the private setup link', true))}>Copy setup link</button>
+        <button className="btn btn-ghost" onClick={() => setPairLink('')}>Done</button>
+      </div>
+    </div>}
+    {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
+      : !accounts ? <p role="status">Loading POS accounts…</p>
+      : accounts.length === 0 ? <p className="muted small">No POS accounts yet.</p>
+      : <ul className="device-list">{accounts.map(account => <li key={account.id}>
+        <div><b>{account.label}</b><div className="muted small">{account.mobile} · {account.role === 'entry' ? 'Entry gate' : 'Exit gate'}</div></div>
+        <Pill tone={account.enabled ? 'ok' : 'warn'}>{account.enabled ? 'Active' : 'Inactive'}</Pill>
+        {account.enabled && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(account)}>Deactivate</button>}
+      </li>)}</ul>}
+    {selected && <div className="banner banner-warn" role="group" aria-label="Confirm account deactivation"><div className="stack">
+      <p>Deactivate <b>{selected.label}</b>? This signs the account out at the gate.</p>
+      <div className="row2">
+        <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(undefined)}>Keep active</button>
+        <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Deactivating…' : 'Deactivate account'}</button>
+      </div>
+    </div></div>}
+  </section>
+}
+
+function OwnerAccessTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [mobile, setMobile] = useState('')
+  const [selected, setSelected] = useState('')
+  const [invite, setInvite] = useState<{ code: string; expiresAt: string }>()
+  const [busy, setBusy] = useState(false)
+
+  async function generate(event: FormEvent) {
+    event.preventDefault()
+    if (!selected) {
+      try { setSelected(indianMobile(mobile)); setInvite(undefined) }
+      catch (failure) { toast((failure as Error).message, true) }
+      return
+    }
+    setBusy(true)
+    try {
+      const response = await callParking<{ code: string; expiresAt: string }>('issueOwnerCode', [selected])
+      setInvite(response.result)
+      setSelected('')
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="owner-access-title">
+    <h2 id="owner-access-title">Owner access</h2>
+    <p className="muted small">Generate a code so a trusted person can set or reset an Owner password for their mobile number.</p>
+    <form className="stack" onSubmit={generate}>
+      <label className="setf"><span className="lbl">Owner mobile number</span>
+        <input className="field small-field" type="tel" value={mobile} autoComplete="off" required disabled={busy}
+          onChange={event => { setMobile(event.target.value); setSelected(''); setInvite(undefined) }} />
+      </label>
+      {selected && <div className="banner banner-warn"><div>Anyone with this code and <b>{selected}</b> can set the password for full Owner access. Share the code privately.</div></div>}
+      <div className="row2">
+        <button className="btn btn-primary" disabled={busy}>{busy ? 'Generating…' : selected ? 'Confirm and generate code' : 'Generate recovery code'}</button>
+        {selected && <button className="btn btn-ghost" type="button" onClick={() => setSelected('')} disabled={busy}>Cancel</button>}
+      </div>
+    </form>
+    {invite && <div className="stack account-form">
+      <p>Enter this one-time code under <b>Owner dashboard → Forgot password</b>. It expires at {fmtTime(Date.parse(invite.expiresAt))} IST.</p>
+      <code className="owner-code">{invite.code}</code>
+      <button className="btn btn-ghost fit" onClick={() => void navigator.clipboard.writeText(invite.code).then(() => toast('Recovery code copied'), () => toast('Could not copy the recovery code', true))}>Copy code</button>
+    </div>}
+  </section>
 }

@@ -12,6 +12,7 @@
     "deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.2",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",

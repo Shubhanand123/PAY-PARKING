@@ -1,6 +1,8 @@
-import { apiEnabled, callParking, deviceKey, setDeviceKey, type Snapshot } from './parking-api'
+import { auth } from './parking-auth'
+import { Login } from './Login'
+import { apiEnabled, callParking, deviceKey, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
 import type { DB } from './engine'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useDB, Ico, Toast } from './ui'
 import { Entry, Exit, Customer } from './Gate'
 import { Owner } from './Owner'
@@ -19,9 +21,8 @@ function LocalApp() {
 function ConnectedApp() {
   const [snapshot, setSnapshot] = useState<Snapshot>()
   const [customer, setCustomer] = useState<DB>()
-  const [key, setKey] = useState('')
+  const [sessionId, setSessionId] = useState<string | null | undefined>(undefined)
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
   const [r, setR] = useState(route())
 
   useEffect(() => {
@@ -33,58 +34,75 @@ function ConnectedApp() {
   }, [])
 
   useEffect(() => {
+    if (!auth) { setSessionId(null); return }
+    const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => {
+      setSessionId(session?.user.id ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
     let active = true
     setError('')
     setCustomer(undefined)
+    setSnapshot(undefined)
     const refresh = async () => {
       try {
         if (r.startsWith('t/')) {
           const response = await callParking('customer', [r.slice(2)], '')
           if (active) setCustomer(response.db)
-        } else if (deviceKey()) {
+        } else if (sessionId || deviceKey()) {
           await callParking('snapshot')
         }
         if (active) setError('')
       } catch (failure) {
-        if (active) setError((failure as Error).message)
+        if (!active) return
+        if (!r.startsWith('t/') && failure instanceof ParkingApiError && (failure.status === 401 || failure.status === 403)) {
+          setDeviceKey('')
+          setSnapshot(undefined)
+          if (sessionId) await auth?.auth.signOut({ scope: 'local' })
+        }
+        setError((failure as Error).message)
       }
     }
     void refresh()
     const poll = setInterval(refresh, 5000)
     return () => { active = false; clearInterval(poll) }
-  }, [r])
+  }, [r, sessionId])
 
-  async function activate(event: FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      await callParking('snapshot', [], key.trim())
-      setDeviceKey(key.trim())
-      setKey('')
-      setError('')
-    } catch (failure) { setError((failure as Error).message) }
-    finally { setBusy(false) }
+  async function activateOwner(key: string) {
+    const response = await callParking('snapshot', [], key)
+    if (response.snapshot?.role !== 'owner') {
+      setSnapshot(undefined)
+      throw new Error('Use your gate mobile number and password to sign in.')
+    }
+    setDeviceKey(key)
+    setSnapshot(response.snapshot)
+  }
+
+  async function signOut() {
+    setDeviceKey('')
+    setSnapshot(undefined)
+    setError('')
+    await auth?.auth.signOut({ scope: 'local' })
+    location.hash = ''
   }
 
   if (r.startsWith('t/')) {
     return customer ? <ParkingApp db={customer} /> : <main className="content"><p role="status">{error || 'Loading ticket…'}</p></main>
   }
-  if (snapshot && deviceKey()) {
-    return <><ParkingApp db={snapshot.db} role={snapshot.role} /><div className="content">
+  if (snapshot && (sessionId || deviceKey())) {
+    return <><ParkingApp db={snapshot.db} role={snapshot.role} signOut={signOut} /><div className="content">
       {error && <p role="alert">{error} Reconnect before collecting cash.</p>}
-      <button className="link" onClick={() => { setDeviceKey(''); setSnapshot(undefined); setError('') }}>Deactivate this device</button>
     </div></>
   }
-  return <main className="screen"><div className="content"><form className="card stack" onSubmit={activate}>
-    <h1>Activate parking device</h1>
-    <label htmlFor="setup-key">Device setup code</label>
-    <input id="setup-key" className="field" type="password" value={key} onChange={event => setKey(event.target.value)} autoComplete="off" required />
-    <button className="btn btn-primary" disabled={busy}>Activate device</button>
-    {error && <p role="alert">{error}</p>}
-  </form></div></main>
+  if (sessionId === undefined || ((sessionId || deviceKey()) && !error)) {
+    return <main className="screen"><div className="content"><p role="status">Connecting to parking records…</p></div></main>
+  }
+  return <Login onOwnerSetup={activateOwner} error={error} />
 }
 
-function ParkingApp({ db, role }: { db: DB; role?: View }) {
+function ParkingApp({ db, role, signOut }: { db: DB; role?: View; signOut?: () => void }) {
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
@@ -99,7 +117,7 @@ function ParkingApp({ db, role }: { db: DB; role?: View }) {
   )
 
   const requested: View = r === 'exit' ? 'exit' : r === 'owner' ? 'owner' : 'entry'
-  const view = role && role !== 'owner' ? role : requested
+  const view = role ?? requested
   const me = db.staff.find(s => s.id === (view === 'entry' ? 'ravi' : view === 'exit' ? 'sunil' : 'owner'))!
   const wide = view === 'owner'
   return (
@@ -108,11 +126,11 @@ function ParkingApp({ db, role }: { db: DB; role?: View }) {
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
-          <span className="demo-tag">{role ? 'Shared parking records' : 'Local mode · this browser'}</span>
+          {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">Local mode · this browser</span>}
         </div>
-        <nav className="switch" aria-label="Choose screen">
+        {!role && <nav className="switch" aria-label="Choose screen">
           {(['entry', 'exit', 'owner'] as View[]).filter(v => !role || role === 'owner' || role === v).map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
-        </nav>
+        </nav>}
         <h1>{view === 'entry' ? 'Vehicle in' : view === 'exit' ? 'Vehicle out' : 'Dashboard'}</h1>
         <p>{me.name} · {db.settings.siteName}</p>
       </header>
