@@ -45,7 +45,6 @@ function ConnectedApp() {
     let active = true
     setError('')
     setCustomer(undefined)
-    setSnapshot(undefined)
     const refresh = async () => {
       try {
         if (r.startsWith('t/')) {
@@ -102,7 +101,7 @@ function ConnectedApp() {
   return <Login onOwnerSetup={activateOwner} error={error} />
 }
 
-function ParkingApp({ db, role, signOut }: { db: DB; role?: View; signOut?: () => void }) {
+function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; signOut?: () => void }) {
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
@@ -117,7 +116,8 @@ function ParkingApp({ db, role, signOut }: { db: DB; role?: View; signOut?: () =
   )
 
   const requested: View = r === 'exit' ? 'exit' : r === 'owner' ? 'owner' : 'entry'
-  const view = role ?? requested
+  const view = role === 'both' ? (requested === 'exit' ? 'exit' : 'entry') : role ?? requested
+  const routes: View[] = role === 'both' ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
   const me = db.staff.find(s => s.id === (view === 'entry' ? 'ravi' : view === 'exit' ? 'sunil' : 'owner'))!
   const wide = view === 'owner'
   return (
@@ -128,8 +128,8 @@ function ParkingApp({ db, role, signOut }: { db: DB; role?: View; signOut?: () =
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
           {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">Local mode · this browser</span>}
         </div>
-        {!role && <nav className="switch" aria-label="Choose screen">
-          {(['entry', 'exit', 'owner'] as View[]).filter(v => !role || role === 'owner' || role === v).map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
+        {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
+          {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
         </nav>}
         <h1>{view === 'entry' ? 'Vehicle in' : view === 'exit' ? 'Vehicle out' : 'Dashboard'}</h1>
         <p>{me.name} · {db.settings.siteName}</p>

@@ -4,7 +4,7 @@ import { auth, indianMobile } from './parking-auth'
 import { loginAlias, pairedPassword } from './parking-identity'
 import { Ico } from './ui'
 
-type Step = 'mobile' | 'credential' | 'recovery-code' | 'new-password' | 'owner-setup'
+type Step = 'credential' | 'recovery' | 'owner-setup'
 type Workspace = 'pos' | 'owner'
 
 const copy = {
@@ -16,7 +16,7 @@ const copy = {
     newPassword: 'Set Owner password', minimum: 'Use at least 10 characters.', confirm: 'Confirm password',
     save: 'Set password', back: 'Back', working: 'Checking…', old: 'Use existing owner setup',
     oldCode: 'Existing owner setup code', pairing: 'Sign in to pair this gate device.',
-    missingPair: 'Open the setup link from your Owner dashboard on this device first.',
+    missingPair: 'Choose Forgot password and enter the setup code from your Owner.',
     failed: 'Sign-in failed. Check your number and credentials.', mismatch: 'The passwords do not match.',
     saved: 'Password set. Sign in with your new password.', unavailable: 'Parking sign-in is unavailable.',
   },
@@ -28,7 +28,7 @@ const copy = {
     newPassword: 'नया पासवर्ड बनाएँ', minimum: 'कम से कम 10 अक्षर रखें।', confirm: 'पासवर्ड दोबारा डालें',
     save: 'पासवर्ड बनाएँ', back: 'पीछे', working: 'जाँच हो रही है…', old: 'मौजूदा मालिक सेटअप का उपयोग करें',
     oldCode: 'मौजूदा मालिक सेटअप कोड', pairing: 'इस गेट डिवाइस को जोड़ने के लिए साइन इन करें।',
-    missingPair: 'पहले इस डिवाइस पर मालिक के डैशबोर्ड से मिला सेटअप लिंक खोलें।',
+    missingPair: 'पासवर्ड भूल गए चुनें और मालिक से मिला सेटअप कोड डालें।',
     failed: 'साइन इन नहीं हुआ। अपना नंबर और पिन या पासवर्ड जाँचें।', mismatch: 'दोनों पासवर्ड एक जैसे नहीं हैं।',
     saved: 'पासवर्ड बन गया। नए पासवर्ड से साइन इन करें।', unavailable: 'अभी पार्किंग साइन इन उपलब्ध नहीं है।',
   },
@@ -38,11 +38,11 @@ export function Login({ onOwnerSetup, error }: {
   onOwnerSetup: (key: string) => Promise<void>
   error: string
 }) {
-  const [step, setStep] = useState<Step>('mobile')
-  const [workspace, setWorkspace] = useState<Workspace>('pos')
+  const [step, setStep] = useState<Step>('credential')
+  const [workspace, setWorkspace] = useState<Workspace>(() => !location.hash.startsWith('#/pair/') && localStorage.getItem('parking-last-workspace') === 'owner' ? 'owner' : 'pos')
   const [language, setLanguage] = useState<'en' | 'hi'>('en')
   const [pairing, setPairing] = useState(() => /^#\/pair\/([a-f0-9]{64})$/.exec(location.hash)?.[1] ?? '')
-  const [identifier, setIdentifier] = useState('')
+  const [identifier, setIdentifier] = useState(() => localStorage.getItem('parking-last-mobile-' + workspace) ?? '')
   const [code, setCode] = useState('')
   const [notice, setNotice] = useState('')
   const [password, setPassword] = useState('')
@@ -54,7 +54,9 @@ export function Login({ onOwnerSetup, error }: {
   const validMobile = /^[6-9]\d{9}$/.test(identifier)
   const pos = workspace === 'pos'
   const validCredential = pos ? /^\d{4,8}$/.test(password) : password.length > 0
-  const validCode = /^[a-f0-9]{32}$/i.test(code.replace(/[\s-]/g, ''))
+  const normalizedCode = code.replace(/[\s-]/g, '')
+  const validCode = (pos ? /^[a-f0-9]{16}$/i : /^[a-f0-9]{32}$/i).test(normalizedCode)
+  const recovering = step === 'recovery'
 
   function go(next: Step) {
     setStep(next)
@@ -62,21 +64,13 @@ export function Login({ onOwnerSetup, error }: {
     setNotice('')
     setPassword('')
     setConfirm('')
-    if (next !== 'new-password') setCode('')
+    setCode('')
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (busy) return
-    if (step === 'mobile') {
-      if (validMobile) go('credential')
-      return
-    }
-    if (step === 'recovery-code') {
-      if (validCode) go('new-password')
-      return
-    }
-    if (step === 'new-password' && password !== confirm) {
+    if (recovering && password !== confirm) {
       setMessage(t.mismatch)
       return
     }
@@ -90,19 +84,29 @@ export function Login({ onOwnerSetup, error }: {
         return
       }
       const mobile = indianMobile(identifier)
-      if (step === 'new-password') {
-        await callParking('redeemOwnerCode', [mobile, code, password], '')
+      const storageKey = 'parking-pairing-' + mobile
+      if (recovering) {
+        if (pos) {
+          const result = await callParking<{ pairingKey: string }>('redeemPosCode', [mobile, normalizedCode, password], '')
+          localStorage.setItem(storageKey, result.result.pairingKey)
+          setPairing('')
+        } else {
+          await callParking('redeemOwnerCode', [mobile, normalizedCode, password], '')
+        }
+        localStorage.setItem('parking-last-mobile-' + workspace, identifier)
+        localStorage.setItem('parking-last-workspace', workspace)
         go('credential')
-        setNotice(t.saved)
+        setNotice(pos ? (language === 'en' ? 'PIN created. Sign in with your new PIN.' : 'पिन बन गया। नए पिन से साइन इन करें।') : t.saved)
         return
       }
       if (!auth) throw new Error(t.unavailable)
-      const storageKey = 'parking-pairing-' + mobile
       const pairingKey = pairing || localStorage.getItem(storageKey) || ''
       if (pos && !pairingKey) throw new Error(t.missingPair)
       const secret = pos ? await pairedPassword(password, pairingKey) : password
       const result = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password: secret })
       if (result.error) throw new Error(t.failed)
+      localStorage.setItem('parking-last-mobile-' + workspace, identifier)
+      localStorage.setItem('parking-last-workspace', workspace)
       if (pos && pairing) {
         localStorage.setItem(storageKey, pairing)
         setPairing('')
@@ -122,8 +126,16 @@ export function Login({ onOwnerSetup, error }: {
     setIdentifier((digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits).slice(0, 10))
   }
 
-  const title = step === 'mobile' ? t.title : step === 'recovery-code' ? t.code
-    : step === 'new-password' ? t.newPassword : step === 'owner-setup' ? t.old : pos ? t.pin : t.password
+  const pinTitle = language === 'en' ? 'Create your PIN' : 'अपना पिन बनाएँ'
+  const title = step === 'owner-setup' ? t.old : recovering ? (pos ? pinTitle : t.newPassword) : t.title
+  const credentialLabel = step === 'owner-setup' ? t.oldCode : pos ? 'PIN' : recovering ? t.newPassword : t.password
+
+  function choose(item: Workspace) {
+    const saved = localStorage.getItem('parking-last-mobile-' + item)
+    if (saved || localStorage.getItem('parking-last-mobile-' + workspace) === identifier) setIdentifier(saved ?? '')
+    setWorkspace(item)
+    go('credential')
+  }
 
   return <div className="screen parking-login" lang={language}>
     <header className="hero">
@@ -138,63 +150,41 @@ export function Login({ onOwnerSetup, error }: {
     <main className="content">
       <form className="card stack login-card" onSubmit={submit}>
         <h2>{title}</h2>
-        {step === 'mobile' && <>
-          <label className="setf" htmlFor="login-mobile"><span className="lbl">{t.mobile}</span>
-            <div className="login-prefix">
-              <span aria-hidden="true">+91</span>
-              <input id="login-mobile" className="field num" type="tel" inputMode="numeric" autoComplete="tel-national"
-                placeholder="98765 43210" value={identifier} onChange={event => updateMobile(event.target.value)} required />
-            </div>
-          </label>
-          <button className="btn btn-primary" disabled={!validMobile}>{t.next}</button>
-        </>}
         {step === 'credential' && <fieldset className="login-workspaces" aria-label={t.title} disabled={busy}>
           {(['pos', 'owner'] as const).map(item => <button key={item} type="button" aria-pressed={workspace === item}
-            onClick={() => { setWorkspace(item); go('credential') }}>{t[item]}</button>)}
+            onClick={() => choose(item)}>{t[item]}</button>)}
         </fieldset>}
-        {step !== 'mobile' && step !== 'owner-setup' && <div className="login-number">
-          <span className="num">+91 {identifier.slice(0, 5)} {identifier.slice(5)}</span>
-          <button className="link" type="button" disabled={busy} onClick={() => go('mobile')}>{t.change}</button>
-        </div>}
-        {step === 'credential' && pos && <div className="login-pin">
-          <div className="login-pin-entry">
-            <label className="lbl" htmlFor="login-pin">{t.pin}</label>
-            <input id="login-pin" className="field num" type="password" inputMode="numeric" autoComplete="current-password" maxLength={8}
-              value={password} onChange={event => setPassword(event.target.value.replace(/\D/g, '').slice(0, 8))} disabled={busy} required />
+        {step !== 'owner-setup' && <label className="setf" htmlFor="login-mobile"><span className="lbl">{t.mobile}</span>
+          <div className="login-prefix"><span aria-hidden="true">+91</span>
+            <input id="login-mobile" className="field num" type="tel" inputMode="numeric" autoComplete="tel-national"
+              placeholder="98765 43210" value={identifier} onChange={event => updateMobile(event.target.value)} disabled={busy} required />
           </div>
-          <div className="login-keypad">
-            {'123456789'.split('').map(digit => <button type="button" key={digit} disabled={busy || password.length >= 8}
-              onClick={() => setPassword(value => value + digit)}>{digit}</button>)}
-            <span aria-hidden="true" />
-            <button type="button" disabled={busy || password.length >= 8} onClick={() => setPassword(value => value + '0')}>0</button>
-            <button type="button" aria-label={t.delete} disabled={busy || !password} onClick={() => setPassword(value => value.slice(0, -1))}>⌫</button>
-          </div>
-          {pairing && <p className="muted small">{t.pairing}</p>}
-        </div>}
-        {step === 'recovery-code' && <>
-          <p className="muted small">{t.codeHelp}</p>
-          <label className="setf"><span className="lbl">{t.code}</span>
-            <input className="field" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code"
-              autoCapitalize="none" spellCheck={false} maxLength={48} required />
-          </label>
-        </>}
-        {(step === 'owner-setup' || step === 'new-password' || (step === 'credential' && !pos)) && <label className="setf">
-          <span className="lbl">{step === 'owner-setup' ? t.oldCode : step === 'new-password' ? t.newPassword : t.password}</span>
-          <input key={step} className="field" type="password" autoComplete={step === 'new-password' ? 'new-password' : step === 'owner-setup' ? 'off' : 'current-password'}
-            minLength={step === 'new-password' ? 10 : undefined} value={password} onChange={event => setPassword(event.target.value)} disabled={busy} required />
-          {step === 'new-password' && <small className="muted">{t.minimum}</small>}
         </label>}
-        {step === 'new-password' && <label className="setf"><span className="lbl">{t.confirm}</span>
-          <input className="field" type="password" autoComplete="new-password" value={confirm} onChange={event => setConfirm(event.target.value)} disabled={busy} required />
+        {recovering && <label className="setf"><span className="lbl">{pos ? (language === 'en' ? 'Setup code' : 'सेटअप कोड') : t.code}</span>
+          <input className="field" value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code"
+            autoCapitalize="none" spellCheck={false} maxLength={48} disabled={busy} required />
         </label>}
-        {step !== 'mobile' && <button className="btn btn-primary" disabled={busy || (step === 'credential' ? !validCredential
-          : step === 'recovery-code' ? !validCode : step === 'new-password' ? password.length < 10 || !confirm : !password.trim())}>
-          {busy ? t.working : step === 'recovery-code' ? t.next : step === 'new-password' ? t.save : t.title}
-        </button>}
-        {step === 'credential' && !pos && <button type="button" className="link" disabled={busy} onClick={() => go('recovery-code')}>{t.forget}</button>}
-        {step === 'mobile' && !pairing && <button type="button" className="link" onClick={() => go('owner-setup')}>{t.old}</button>}
-        {(step === 'owner-setup' || step === 'recovery-code' || step === 'new-password') && <button type="button" className="link" disabled={busy}
-          onClick={() => go(step === 'owner-setup' ? 'mobile' : step === 'new-password' ? 'recovery-code' : 'credential')}>{t.back}</button>}
+        <label className="setf"><span className="lbl">{credentialLabel}</span>
+          <input key={step + workspace} className="field" type="password"
+            inputMode={step !== 'owner-setup' && pos ? 'numeric' : undefined}
+            autoComplete={recovering ? 'new-password' : step === 'owner-setup' ? 'off' : 'current-password'}
+            minLength={recovering ? (pos ? 4 : 10) : undefined}
+            maxLength={step !== 'owner-setup' && pos ? 8 : undefined}
+            value={password} onChange={event => setPassword(step !== 'owner-setup' && pos ? event.target.value.replace(/\D/g, '').slice(0, 8) : event.target.value)}
+            disabled={busy} required />
+        </label>
+        {recovering && <label className="setf"><span className="lbl">{pos ? (language === 'en' ? 'Confirm PIN' : 'पिन दोबारा डालें') : t.confirm}</span>
+          <input className="field" type="password" inputMode={pos ? 'numeric' : undefined} maxLength={pos ? 8 : undefined}
+            autoComplete="new-password" value={confirm} onChange={event => setConfirm(pos ? event.target.value.replace(/\D/g, '').slice(0, 8) : event.target.value)}
+            disabled={busy} required />
+        </label>}
+        <button className="btn btn-primary" disabled={busy || (step === 'owner-setup' ? !password.trim()
+          : !validMobile || (recovering ? !validCode || (pos ? !validCredential : password.length < 10) || !confirm : !validCredential))}>
+          {busy ? t.working : recovering ? (pos ? pinTitle : t.save) : t.title}
+        </button>
+        {step === 'credential' && <button type="button" className="link" disabled={busy} onClick={() => go('recovery')}>{t.forget}</button>}
+        {step === 'credential' && !pos && <button type="button" className="link subtle" disabled={busy} onClick={() => go('owner-setup')}>{t.old}</button>}
+        {step !== 'credential' && <button type="button" className="link" disabled={busy} onClick={() => go('credential')}>{t.back}</button>}
         {notice && <p className="msg ok" role="status">{notice}</p>}
         {(message || error) && <p className="msg bad" role="alert">{message || error}</p>}
       </form>

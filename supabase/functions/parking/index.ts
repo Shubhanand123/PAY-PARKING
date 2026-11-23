@@ -24,7 +24,7 @@ type AuthUser = {
   id: string
   phone?: string
   email?: string
-  app_metadata?: { parking_role?: 'owner' | 'entry' | 'exit'; parking_label?: string; parking_mobile?: string; parking_enabled?: boolean }
+  app_metadata?: { parking_role?: 'owner' | 'entry' | 'exit' | 'both'; parking_label?: string; parking_mobile?: string; parking_enabled?: boolean }
 }
 
 async function authRequest(path: string, options: RequestInit = {}, bearer = serviceKey) {
@@ -37,6 +37,10 @@ async function authRequest(path: string, options: RequestInit = {}, bearer = ser
 const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 const randomToken = (size = 32) => hex(crypto.getRandomValues(new Uint8Array(size)))
 const validMobile = (value: unknown): value is string => typeof value === 'string' && /^\+91[6-9]\d{9}$/.test(value)
+type GateAccess = 'entry' | 'exit' | 'both'
+const isGate = (value: unknown): value is GateAccess => value === 'entry' || value === 'exit' || value === 'both'
+type PosSetup = { mobile: string; label: string; gate: GateAccess; expires_at: string }
+
 const validOwnerPassword = (value: unknown): value is string => typeof value === 'string' && value.length >= 10 && new TextEncoder().encode(value).length <= 72
 
 async function hashCode(value: string) {
@@ -89,6 +93,42 @@ async function redeemOwnerCode(args: unknown[]) {
     })
   }
   return reply({ result: true })
+}
+
+async function redeemPosCode(args: unknown[]) {
+  const [mobile, rawCode, pin] = args
+  const code = typeof rawCode === 'string' ? rawCode.replace(/[\s-]/g, '').toLowerCase() : ''
+  if (!validMobile(mobile) || !/^[a-f0-9]{16}$/.test(code) || typeof pin !== 'string' || !/^\d{4,8}$/.test(pin)) {
+    return reply({ error: 'Enter your mobile number, setup code and a PIN with 4 to 8 digits.' }, 400)
+  }
+  const now = new Date().toISOString()
+  const query = new URLSearchParams({ mobile: 'eq.' + mobile, code_hash: 'eq.' + await hashCode(code), expires_at: 'gt.' + now, used_at: 'is.null' })
+  const path = 'parking_pos_setup?select=mobile,label,gate,expires_at&' + query
+  const [pending] = await database<PosSetup[]>(path)
+  if (!pending) return reply({ error: 'This setup code is invalid, expired or already used.' }, 400)
+  const email = loginAlias(mobile)
+  const existing = (await authUsers()).find(user => user.email === email)
+  if (existing && (!isGate(existing.app_metadata?.parking_role) || existing.app_metadata?.parking_enabled !== true)) {
+    return reply({ error: 'This mobile number is unavailable for POS setup.' }, 409)
+  }
+  const [claimed] = await database<PosSetup[]>(path, {
+    method: 'PATCH', headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ used_at: now, invalidate_before: now }),
+  })
+  if (!claimed) return reply({ error: 'This setup code is invalid, expired or already used.' }, 400)
+  const pairingKey = randomToken()
+  const password = await pairedPassword(pin, pairingKey)
+  const app_metadata = { parking_role: claimed.gate, parking_label: claimed.label, parking_mobile: mobile }
+  const response = await authRequest(existing ? 'admin/users/' + existing.id : 'admin/users', {
+    method: existing ? 'PUT' : 'POST',
+    body: JSON.stringify(existing ? { password, app_metadata } : { email, email_confirm: true, password, app_metadata: { ...app_metadata, parking_enabled: true } }),
+  })
+  if (!response.ok) return reply({ error: 'Could not save the PIN. Ask the Owner for a new setup code.' }, 409)
+  if (existing) await database('parking_pos_setup?' + new URLSearchParams({ mobile: 'eq.' + mobile }), {
+    method: 'PATCH', headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ invalidate_before: new Date().toISOString() }),
+  })
+  return reply({ result: { pairingKey } })
 }
 
 const actions = {
@@ -169,6 +209,7 @@ Deno.serve(async request => {
       return reply({ db: { ...db, seq: 0, tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }], payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })), tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [] } })
     }
     if (action === 'redeemOwnerCode') return await redeemOwnerCode(args)
+    if (action === 'redeemPosCode') return await redeemPosCode(args)
     const authorization = request.headers.get('Authorization')
     let digest: string | undefined
     let signedIn: AuthUser | undefined
@@ -187,6 +228,12 @@ Deno.serve(async request => {
         if (!session || !access.parking_mobile || !await database<boolean>('rpc/parking_owner_session_valid', {
           method: 'POST', body: JSON.stringify({ owner_id: signedIn?.id, owner_session: session, owner_mobile: access.parking_mobile }),
         })) return reply({ error: 'Sign in again with your current Owner password.' }, 401)
+      }
+      if (isGate(role) && access.parking_mobile) {
+        const session = verifiedSessionId(authorization.slice(7))
+        if (!session || !await database<boolean>('rpc/parking_pos_session_valid', {
+          method: 'POST', body: JSON.stringify({ operator_id: signedIn?.id, operator_session: session, operator_mobile: access.parking_mobile }),
+        })) return reply({ error: 'Sign in again with your current PIN.' }, 401)
       }
     } else {
       const key = request.headers.get('X-Device-Key') ?? ''
@@ -213,14 +260,25 @@ Deno.serve(async request => {
       return reply({ result: { code, expiresAt } }, 201)
     }
 
-    if (action === 'listAccounts' || action === 'createPosAccount' || action === 'disablePosAccount') {
+    if (['listAccounts', 'issuePosCode', 'disablePosAccount', 'cancelPosSetup'].includes(action)) {
       if (role !== 'owner') return reply({ error: 'Only the owner can manage POS accounts.' }, 403)
       if (action === 'listAccounts') {
         const users = await authUsers()
-        return reply({ result: users.filter(user => user.app_metadata?.parking_role === 'entry' || user.app_metadata?.parking_role === 'exit').map(user => ({
+        const accounts = users.filter(user => isGate(user.app_metadata?.parking_role)).map(user => ({
           id: user.id, mobile: user.app_metadata?.parking_mobile, role: user.app_metadata?.parking_role,
-          label: user.app_metadata?.parking_label, enabled: user.app_metadata?.parking_enabled === true,
-        })) })
+          label: user.app_metadata?.parking_label, enabled: user.app_metadata?.parking_enabled === true, pending: false,
+        }))
+        const pending = await database<PosSetup[]>('parking_pos_setup?select=mobile,label,gate,expires_at&used_at=is.null&expires_at=gt.' + encodeURIComponent(new Date().toISOString()))
+        return reply({ result: [...accounts, ...pending.filter(item => !accounts.some(account => account.mobile === item.mobile)).map(item => ({
+          id: item.mobile, mobile: item.mobile, role: item.gate, label: item.label, enabled: false, pending: true,
+        }))] })
+      }
+      if (action === 'cancelPosSetup') {
+        if (!validMobile(args[0])) return reply({ error: 'Choose a pending POS setup.' }, 400)
+        await database('parking_pos_setup?' + new URLSearchParams({ mobile: 'eq.' + args[0], used_at: 'is.null' }), {
+          method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ expires_at: new Date().toISOString() }),
+        })
+        return reply({ result: true })
       }
       if (action === 'disablePosAccount') {
         const [id] = args
@@ -228,33 +286,30 @@ Deno.serve(async request => {
         const response = await authRequest('admin/users/' + id)
         if (!response.ok) return reply({ error: 'POS account was not found.' }, 404)
         const account = await response.json() as AuthUser
-        if (account.app_metadata?.parking_role !== 'entry' && account.app_metadata?.parking_role !== 'exit') return reply({ error: 'Choose a POS account.' }, 400)
+        if (!isGate(account.app_metadata?.parking_role)) return reply({ error: 'Choose a POS account.' }, 400)
         const updated = await authRequest('admin/users/' + id, { method: 'PUT', body: JSON.stringify({
           app_metadata: { ...account.app_metadata, parking_enabled: false }, ban_duration: '876000h',
         }) })
         if (!updated.ok) throw new Error('Could not deactivate the POS account.')
         return reply({ result: true })
       }
-      const [phone, passcode, gate, label] = args
-      if (!validMobile(phone) || typeof passcode !== 'string' || !/^\d{4,8}$/.test(passcode)
-        || (gate !== 'entry' && gate !== 'exit') || typeof label !== 'string' || !label.trim() || label.trim().length > 80) {
-        return reply({ error: 'Enter a valid mobile number, a 4–8 digit PIN, a gate, and a name.' }, 400)
+      const [mobile, gate, label] = args
+      if (!validMobile(mobile) || !isGate(gate) || typeof label !== 'string' || !label.trim() || label.trim().length > 80) {
+        return reply({ error: 'Enter a valid mobile number, a gate and an operator name.' }, 400)
       }
-      const pairingKey = randomToken()
-      const password = await pairedPassword(passcode, pairingKey)
-      const response = await authRequest('admin/users', { method: 'POST', body: JSON.stringify({
-        email: loginAlias(phone), email_confirm: true, password,
-        app_metadata: { parking_role: gate, parking_label: label.trim(), parking_mobile: phone, parking_enabled: true },
-      }) })
-      if (!response.ok) {
-        const issue = await response.json().catch(() => ({}))
-        if (['email_exists', 'user_already_exists'].includes(issue.error_code ?? issue.code)) return reply({ error: 'That mobile number is already registered.' }, 409)
-        return reply({ error: 'Could not create the account. Check the mobile number and passcode.' }, 400)
+      const existing = (await authUsers()).find(user => user.email === loginAlias(mobile))
+      if (existing && (!isGate(existing.app_metadata?.parking_role) || existing.app_metadata?.parking_enabled !== true)) {
+        return reply({ error: 'This mobile number is unavailable for POS setup.' }, 409)
       }
-      return reply({ result: { pairingKey } }, 201)
+      const code = randomToken(8)
+      const expiresAt = new Date(Date.now() + 30 * 60000).toISOString()
+      await database('parking_pos_setup?on_conflict=mobile', {
+        method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({ mobile, label: label.trim(), gate, code_hash: await hashCode(code), expires_at: expiresAt, used_at: null }),
+      })
+      return reply({ result: { code, expiresAt } }, 201)
     }
 
-    const staffId = role === 'entry' ? 'ravi' : role === 'exit' ? 'sunil' : 'owner'
     if (action === 'listDevices' || action === 'deactivateDevice') {
       if (role !== 'owner') return reply({ error: 'Only an owner can manage devices.' }, 403)
       if (action === 'listDevices') {
@@ -276,7 +331,10 @@ Deno.serve(async request => {
     if (action === 'snapshot') return reply({ snapshot: { ...await state(), role } })
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
     const command = actions[action as keyof typeof actions]
-    if (!command.roles.includes(role)) return reply({ error: 'This device cannot perform that action.' }, 403)
+    const allowed = role === 'both'
+      ? command.roles.includes('entry') || command.roles.includes('exit')
+      : command.roles.includes(role)
+    if (!allowed) return reply({ error: 'This device cannot perform that action.' }, 403)
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const { db, version } = await state()
@@ -285,6 +343,10 @@ Deno.serve(async request => {
         return reply({ error: 'Check the parking details and try again.' }, 400)
       }
       const commandFn = command.fn as (db: parking.DB, staff: parking.Staff, ...args: unknown[]) => unknown
+      const atExit = action === 'markPrinted'
+        ? db.tickets.some(ticket => ticket.id === args[0] && ticket.status === 'exited')
+        : action !== 'createEntry'
+      const staffId = role === 'owner' ? 'owner' : role === 'exit' || (role === 'both' && atExit) ? 'sunil' : 'ravi'
       const result = parking.runAction(db, staffId, (snapshot, staff) => {
         const label = signedIn?.app_metadata?.parking_label
         return commandFn(snapshot, label ? { ...staff, name: label } : staff, ...args)

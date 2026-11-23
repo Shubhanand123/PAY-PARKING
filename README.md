@@ -52,12 +52,14 @@ minutes and can be used once. Generating another code for a mobile number
 replaces the previous unused code. Password recovery invalidates older Owner
 sessions. Creating an additional Owner leaves existing Owner accounts active.
 
-In Owner → Devices, create a POS account with an Indian mobile number, a PIN
-and its gate role. Open the private setup link or scan the setup QR on the gate
-device, then sign in using that mobile number and PIN. Subsequent sign-ins use
-the same number and PIN in that browser. Keep the private pairing link safe
-for device setup. Deactivating a POS account disables access at all its paired
-devices. Existing gate setup credentials can be retired in the same dashboard.
+In Owner → Devices, choose the POS operator's mobile number and Entry, Exit,
+or Entry + Exit access. Generate a one-time setup code and give it privately
+to the operator. On the gate device the operator opens Gate POS → Forgot
+password, enters the same mobile number and code, and creates their own PIN.
+The code expires after 30 minutes. The device remembers the mobile number and
+its setup credential after setup. Repeat with a fresh code when replacing the
+gate device or resetting a PIN. Resetting invalidates prior sessions.
+Deactivation disables access from the Owner dashboard.
 
 The UI uses mobile numbers as the sign-in identifier. Supabase Auth receives
 an internal email alias because SMS authentication is disabled on the project.

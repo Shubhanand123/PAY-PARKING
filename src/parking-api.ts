@@ -17,7 +17,7 @@ export class ParkingApiError extends Error {
   }
 }
 
-export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'owner'; version: number }
+export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'both' | 'owner'; version: number }
 let version = -1
 export async function callParking<T>(action: string, args: unknown[] = [], setupKey?: string) {
   const session = action === 'customer' || setupKey !== undefined ? null : (await auth?.auth.getSession())?.data.session

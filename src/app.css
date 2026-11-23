@@ -365,11 +365,41 @@ html,body{background:var(--color-bg-page)}
 .login-workspaces { display: flex; gap: 5px; padding: 4px; margin: 0; border: 0; border-radius: 14px; background: var(--color-bg-subtle); min-inline-size: 0; }
 .login-workspaces button { flex: 1; min-height: 44px; padding: 4px 8px; border: 0; border-radius: 11px; background: transparent; color: var(--color-text-secondary); font-weight: 650; cursor: pointer; }
 .login-workspaces button[aria-pressed="true"] { background: var(--color-bg-surface); color: var(--color-text); box-shadow: var(--shadow-sm); }
-.login-number { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; font-size: 14px; color: var(--color-text-secondary); }
-.login-pin-entry { max-width: 12rem; margin-inline: auto; text-align: center; }
-.login-pin-entry input { text-align: center; letter-spacing: .24em; }
-.login-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
-.login-keypad button { min-height: 54px; border: 0; border-radius: 14px; background: var(--color-bg-subtle); font-size: 22px; font-weight: 750; cursor: pointer; }
-.login-keypad button:active { background: var(--color-accent-subtle); }
-.login-keypad button:disabled { opacity: .5; cursor: default; }
-.login-pin .small { margin-top: 10px; }
+
+/* Size the UI to the viewport and keep long controls and data inside their cards. */
+.screen { width: 100%; min-width: 0; }
+.screen.wide { max-width: 1440px; }
+.screen:has(.hero.compact) { max-width: 760px; }
+.content, .card, .stack, .owner, .owner-panel, .grid2 > *, .kpis > * { min-inline-size: 0; }
+.btn { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; padding-block: .55rem; text-align: center; line-height: 1.25; }
+.btn.fit { max-inline-size: 100%; }
+.row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.brand, .kpi-v, .kpi-s, .device-list li > div:first-child { overflow-wrap: anywhere; min-width: 0; }
+.hero-row .signout { flex: none; }
+.tabs { min-width: 0; }
+.tab { white-space: normal; text-align: left; }
+.owner .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.owner .bars { gap: 5px; }
+.owner .bar-v { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 719px) {
+  .screen.wide { max-width: 620px; }
+  .owner .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+  .owner .tab { padding: 6px 4px; flex-direction: column; gap: 3px; font-size: .75rem; text-align: center; justify-content: center; min-height: 48px; }
+  .owner .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 4px; }
+  .owner .flow-road { display: none; }
+}
+@media (min-width: 720px) {
+  .owner .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1050px) {
+  .owner { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; gap: 18px; }
+  .owner .tabs { display: flex; position: sticky; top: 16px; flex-direction: column; overflow: visible; }
+  .owner .tab { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 380px) {
+  .row2 { grid-template-columns: minmax(0, 1fr); }
+  .btn { padding-inline: .65rem; font-size: .92rem; }
+  .card, .kpi { padding-inline: 12px; }
+  .switch { width: 100%; }
+  .sw-btn { flex: 1; min-width: 0; text-align: center; }
+}

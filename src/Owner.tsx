@@ -6,7 +6,7 @@ import {
   activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
-import { Ico, Pill, QR, useNow } from './ui'
+import { Ico, Pill, useNow } from './ui'
 import { Slip, StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
 
@@ -21,12 +21,14 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       <nav className="tabs" aria-label="Owner sections">
         {tabs.map(([k, l, i]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)} aria-current={tab === k}><Ico n={i} size={18} />{l}</button>)}
       </nav>
+      <div className="owner-panel">
       {tab === 'overview' && <Overview db={db} />}
       {tab === 'tickets' && <Tickets db={db} />}
       {tab === 'audit' && <AuditLog db={db} />}
       {tab === 'rates' && <Rates db={db} me={me} toast={toast} />}
       {tab === 'devices' && <div className="stack"><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /><DevicesTab toast={toast} /></div>}
       {tab === 'settings' && <SettingsTab db={db} me={me} toast={toast} />}
+      </div>
     </div>
   )
 }
@@ -419,8 +421,9 @@ type PosAccount = {
   id: string
   label: string
   mobile: string
-  role: 'entry' | 'exit'
+  role: 'entry' | 'exit' | 'both'
   enabled: boolean
+  pending: boolean
 }
 
 function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
@@ -428,9 +431,8 @@ function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => voi
   const [showForm, setShowForm] = useState(false)
   const [label, setLabel] = useState('')
   const [mobile, setMobile] = useState('')
-  const [passcode, setPasscode] = useState('')
-  const [gate, setGate] = useState<'entry' | 'exit'>('entry')
-  const [pairLink, setPairLink] = useState('')
+  const [gate, setGate] = useState<PosAccount['role']>('entry')
+  const [invite, setInvite] = useState<{ code: string; expiresAt: string; mobile: string }>()
   const [selected, setSelected] = useState<PosAccount>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -444,41 +446,42 @@ function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => voi
     return () => { current = false }
   }, [refresh])
 
-  function openForm() {
+  function openForm(account?: PosAccount) {
     setShowForm(true)
-    setLabel('')
-    setMobile('')
-    setPasscode('')
-    setPairLink('')
+    setLabel(account?.label ?? '')
+    setMobile(account?.mobile ?? '')
+    setGate(account?.role ?? 'entry')
+    setInvite(undefined)
   }
 
   async function create(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
     try {
-      const response = await callParking<{ pairingKey: string }>('createPosAccount', [indianMobile(mobile), passcode, gate, label.trim()])
-      setPairLink(location.origin + location.pathname + '#/pair/' + response.result.pairingKey)
-      toast('POS account created')
+      const number = indianMobile(mobile)
+      const response = await callParking<{ code: string; expiresAt: string }>('issuePosCode', [number, gate, label.trim()])
+      setInvite({ ...response.result, mobile: number })
+      toast('POS setup code generated')
       setShowForm(false)
       setRefresh(n => n + 1)
     } catch (failure) { toast((failure as Error).message, true) }
-    finally { setPasscode(''); setBusy(false) }
+    finally { setBusy(false) }
   }
 
   async function deactivate(account: PosAccount) {
     setBusy(true)
     try {
-      await callParking('disablePosAccount', [account.id])
-      setAccounts(current => current?.map(item => item.id === account.id ? { ...item, enabled: false } : item))
+      await callParking(account.pending ? 'cancelPosSetup' : 'disablePosAccount', [account.id])
+      setAccounts(current => current?.filter(item => !(item.id === account.id && account.pending)).map(item => item.id === account.id ? { ...item, enabled: false } : item))
       setSelected(undefined)
-      toast(`${account.label} deactivated`)
+      toast(account.pending ? 'Setup code cancelled' : `${account.label} deactivated`)
     } catch (failure) { toast((failure as Error).message, true) }
     finally { setBusy(false) }
   }
 
   return <section className="card stack" aria-labelledby="pos-accounts-title">
     <h2 id="pos-accounts-title">POS accounts</h2>
-    <button className="btn btn-primary fit" disabled={busy} onClick={openForm}>Create POS account</button>
+    <button className="btn btn-primary fit" disabled={busy} onClick={() => openForm()}>Create POS account</button>
     {showForm && <form className="stack account-form" onSubmit={create}>
       <h3>New POS account</h3>
       <label className="setf"><span className="lbl">Operator or gate name</span>
@@ -488,37 +491,37 @@ function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => voi
         <input className="field small-field" type="tel" autoComplete="off" value={mobile} onChange={event => setMobile(event.target.value)} required />
       </label>
       <label className="setf"><span className="lbl">Gate access</span>
-        <select className="field small-field" value={gate} onChange={event => setGate(event.target.value === 'exit' ? 'exit' : 'entry')}><option value="entry">Entry POS</option><option value="exit">Exit POS</option></select>
+        <select className="field small-field" value={gate} onChange={event => setGate(event.target.value as PosAccount['role'])}>
+          <option value="entry">Entry only</option><option value="exit">Exit only</option><option value="both">Entry + Exit</option>
+        </select>
       </label>
-      <label className="setf"><span className="lbl">PIN · 4 to 8 digits</span>
-        <input className="field small-field" type="password" inputMode="numeric" autoComplete="new-password"
-          pattern="[0-9]{4,8}" minLength={4} maxLength={8}
-          value={passcode} onChange={event => setPasscode(event.target.value)} required />
-      </label>
-      <div className="row2"><button className="btn btn-ghost" type="button" onClick={() => { setShowForm(false); setPasscode('') }} disabled={busy}>Cancel</button><button className="btn btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button></div>
+      <div className="row2"><button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)} disabled={busy}>Cancel</button><button className="btn btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Generate setup code'}</button></div>
     </form>}
-    {pairLink && <div className="stack account-form">
-      <h3>Pair the gate device</h3>
-      <p className="muted small">Scan this QR or open the private setup link on the gate device. Sign in there with the POS mobile number and PIN. Copy the link now so you can set up the device later.</p>
-      <QR text={pairLink} size={160} />
+    {invite && <div className="stack account-form">
+      <h3>Setup code for {invite.mobile}</h3>
+      <p className="muted small">The operator can enter this code under <b>Gate POS → Forgot password</b> to choose a PIN. It works once and expires at {fmtTime(Date.parse(invite.expiresAt))} IST.</p>
+      <code className="owner-code">{invite.code.match(/.{4}/g)?.join('-')}</code>
       <div className="row2">
-        <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(pairLink).then(() => toast('Private setup link copied'), () => toast('Could not copy the private setup link', true))}>Copy setup link</button>
-        <button className="btn btn-ghost" onClick={() => setPairLink('')}>Done</button>
+        <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(invite.code).then(() => toast('Setup code copied'), () => toast('Could not copy the setup code', true))}>Copy setup code</button>
+        <button className="btn btn-ghost" onClick={() => setInvite(undefined)}>Done</button>
       </div>
     </div>}
     {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
       : !accounts ? <p role="status">Loading POS accounts…</p>
       : accounts.length === 0 ? <p className="muted small">No POS accounts yet.</p>
       : <ul className="device-list">{accounts.map(account => <li key={account.id}>
-        <div><b>{account.label}</b><div className="muted small">{account.mobile} · {account.role === 'entry' ? 'Entry gate' : 'Exit gate'}</div></div>
-        <Pill tone={account.enabled ? 'ok' : 'warn'}>{account.enabled ? 'Active' : 'Inactive'}</Pill>
-        {account.enabled && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(account)}>Deactivate</button>}
+        <div><b>{account.label}</b><div className="muted small">{account.mobile} · {account.role === 'both' ? 'Entry + Exit' : account.role === 'entry' ? 'Entry gate' : 'Exit gate'}</div></div>
+        <Pill tone={account.enabled ? 'ok' : 'warn'}>{account.pending ? 'Pending setup' : account.enabled ? 'Active' : 'Inactive'}</Pill>
+        {(account.enabled || account.pending) && <>
+          <button className="btn btn-ghost fit" disabled={busy} onClick={() => openForm(account)}>New setup code</button>
+          <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(account)}>{account.pending ? 'Cancel code' : 'Deactivate'}</button>
+        </>}
       </li>)}</ul>}
     {selected && <div className="banner banner-warn" role="group" aria-label="Confirm account deactivation"><div className="stack">
-      <p>Deactivate <b>{selected.label}</b>? This signs the account out at the gate.</p>
+      <p>{selected.pending ? 'Cancel the setup code for' : 'Deactivate'} <b>{selected.label}</b>?</p>
       <div className="row2">
         <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(undefined)}>Keep active</button>
-        <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Deactivating…' : 'Deactivate account'}</button>
+        <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Saving…' : selected.pending ? 'Cancel setup code' : 'Deactivate account'}</button>
       </div>
     </div></div>}
   </section>
