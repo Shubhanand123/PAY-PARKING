@@ -172,7 +172,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
         }} />}
         <label className="lbl" htmlFor="plate">Vehicle number</label>
         <input id="plate" ref={inp} className="field plate-field" value={plate} inputMode="text" enterKeyHint="done" autoCapitalize="characters" autoComplete="off"
-          placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
+          placeholder="GA 07 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
         {chk && <div className="plate-meta">
           {validPlate ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">Check the plate format, e.g. GA 01 AB 1234</Pill>}
           {conf !== null && <Pill tone="warn">Check the scanned plate</Pill>}
