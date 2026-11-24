@@ -188,3 +188,29 @@
 /* only the QR, as big as the screen allows */
 .q9-code:not(.poster) { width: min(100%, 420px); border-radius: 8px; }
 .q9-card { padding: 10px; }
+
+/* v2.0 pay screen: fills any screen, QR square sized to what is left */
+.q9 { min-height: calc(100dvh - 120px - var(--safe-top) - var(--safe-bottom)); gap: 10px; }
+.q9-top { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.q9-top .btn { width: 100%; min-height: 44px; font-size: 14.5px; padding-inline: 8px; }
+.q9-due { padding: 10px 14px; }
+.q9-amt { font-size: clamp(30px, 9vw, 44px); }
+.q9-veh { min-width: 0; }
+.q9-veh small { overflow-wrap: anywhere; }
+.q9-card { flex: 1; padding: 10px; gap: 10px; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+.q9-code, .q9-code:not(.poster) { width: min(100%, 52dvh, 460px); aspect-ratio: 1; margin: 0 auto; border-radius: 10px; }
+.q9-code img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.q9-over { gap: 10px; }
+.q9-over .btn { min-height: 44px; }
+.q9-confirm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 300px; }
+.q9-actions .btn { width: 100%; }
+.q9-status { text-align: center; }
+.q9-steps { display: none; }
+@media (max-height: 640px) { .q9-code, .q9-code:not(.poster) { width: min(100%, 44dvh); } .q9-due { padding: 8px 12px; } .gh-tabs, .gh-flow { margin-top: 6px; } }
+/* every two-button row stays inside the screen */
+.actionbar.duo { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)) !important; }
+.actionbar.duo .btn { min-width: 0; padding-inline: 10px; font-size: clamp(15px, 4.2vw, 17px); }
+.pay-btn small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-row { flex-wrap: nowrap; min-width: 0; }
+@media (max-width: 360px) { .gh-time { display: none; } .gh-name { letter-spacing: .06em; } }
+@media (min-width: 700px) { .gh + .content { padding-inline: 24px; } }

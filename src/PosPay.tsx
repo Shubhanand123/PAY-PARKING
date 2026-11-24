@@ -93,17 +93,26 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
 
   const check = () => run(async () => { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id }); onRevision(r.revision) })
   const close = () => run(async () => { const r = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id }); onRevision(r.revision); return true })
-  const toCash = async () => { if (!code) { onCash(); return } if (await close()) onCash() }
+  const cancelQr = async () => { if (!code) { onCash(); return } if (await close()) onCash() }
   const remake = async () => { if (await close()) { setCode(null); await create() } }
 
+  // Only a plain QR goes in the box. An older QR that came as Razorpay's full picture is replaced once by a plain one.
+  const pictureOnly = Boolean(code?.image && !code.text)
+  const remade = useRef(false)
+  useEffect(() => {
+    if (!pictureOnly || paid || remade.current || busyRef.current) return
+    remade.current = true
+    void remake()
+  }, [pictureOnly, paid]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const mm = String(Math.floor(left / 60000)).padStart(2, '0'), ss = String(Math.floor(left / 1000) % 60).padStart(2, '0')
-  const state = paid ? 'paid' : expired ? 'expired' : code ? 'waiting' : 'making'
+  const state = paid ? 'paid' : expired ? 'expired' : code?.text ? 'waiting' : 'making'
 
   return (
     <section className={'q9 q9-' + state} aria-label="Pay by UPI">
       {!paid && <div className="q9-top">
-        <button className="btn btn-ghost fit" disabled={busy} onClick={onBack}><Ico n="back" size={18} /> Back to bill</button>
-        <button className="btn btn-ghost fit danger-text" disabled={busy || !code} onClick={() => setConfirmCash(true)}><Ico n="x" size={16} /> Cancel QR</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={onBack}><Ico n="back" size={18} /> Back to bill</button>
+        <button className="btn btn-ghost danger-text" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="x" size={16} /> Cancel QR</button>
       </div>}
       <div className="q9-due">
         <div><span className="q9-lab">Amount due</span><b className="q9-amt num">{rupees(amount)}</b></div>
@@ -114,43 +123,38 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
       </div>
 
       <div className="q9-card">
-        <div className={'q9-code' + (code?.image && !code.text ? ' poster' : '')}>
-          {code?.text ? <QR text={code.text} size={400} level="H" /> : code?.image ? <img src={code.image} alt="UPI payment QR code" /> : <div className="q9-ph" />}
-          {code?.text && !code.link && <span className="q9-mark"><Ico n="p" size={26} /></span>}
-          {state === 'waiting' && !(code?.image && !code.text) && <i className="q9-beam" />}
+        <div className="q9-code">
+          {code?.text ? <QR text={code.text} size={480} level="H" /> : <div className="q9-ph" />}
+          {code?.text && <span className="q9-mark"><Ico n="p" size={26} /></span>}
+          {state === 'waiting' && <i className="q9-beam" />}
           {state === 'paid' && <div className="q9-over ok"><span className="q9-tick"><Ico n="check" size={40} /></span><b>{rupees(amount)} received</b><small>Opening the receipt…</small></div>}
           {state === 'expired' && <div className="q9-over"><b>QR expired</b><small>It was valid for 30 minutes. Make a new one for the amount due now.</small>
-            <button className="btn btn-primary fit" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR</button></div>}
-          {state === 'making' && <div className="q9-over"><small>{busy ? 'Making the QR…' : 'No UPI QR. See the message below.'}</small>{!busy && <button className="btn btn-primary fit" onClick={() => void create()}>Try again</button>}</div>}
+            <button className="btn btn-primary" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR</button></div>}
+          {state === 'making' && <div className="q9-over"><small>{busy ? 'Making the QR…' : 'The QR could not be made.'}</small>
+            {!busy && <button className="btn btn-primary" onClick={() => void (code ? remake() : create())}>Try again</button>}
+            {!busy && code?.image && <a className="link" href={code.image} target="_blank" rel="noopener noreferrer">Open on Razorpay instead</a>}</div>}
+          {confirmCash && !paid && <div className="q9-over">
+            <b>Cancel this QR?</b><small>The customer can't pay it after this. If they say money was debited, tap Check first.</small>
+            <div className="q9-confirm">
+              <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmCash(false)}>Keep QR</button>
+              <button className="btn btn-danger" disabled={busy} onClick={() => void cancelQr()}>{busy ? 'Closing…' : 'Cancel QR'}</button>
+            </div>
+            <button className="link" disabled={busy} onClick={() => void check()}>Check payment</button>
+          </div>}
         </div>
         <div className="q9-timer">
-          <div className="q9-tl"><span>QR valid for</span><b className="num">{mm}:{ss}</b></div>
-          <div className="q9-bar"><i style={{ transform: `scaleX(${left / VALID_MS})` }} /></div>
+          <div className="q9-tl"><span>QR valid for</span><b className="num">{code?.text ? `${mm}:${ss}` : '–'}</b></div>
+          <div className="q9-bar"><i style={{ transform: `scaleX(${code?.text ? left / VALID_MS : 0})` }} /></div>
         </div>
       </div>
 
       <p className={'q9-status ' + state} role="status">
-        {state === 'paid' ? 'Payment received' : state === 'expired' ? 'QR expired' : state === 'making' ? 'Getting the QR ready' : <><span className="q9-dots"><i /><i /><i /></span>Waiting for payment</>}
+        {state === 'paid' ? 'Payment received' : state === 'expired' ? 'QR expired' : state === 'making' ? 'Getting the QR ready' : <><span className="q9-dots"><i /><i /><i /></span>Waiting for payment · scan with any UPI app</>}
       </p>
-      <ol className="q9-steps">
-        <li><span><Ico n="key" /></span>Open any UPI app</li>
-        <li><span><Ico n="scan" /></span>Scan the code</li>
-        <li><span><Ico n="check" /></span>Approve {rupees(amount)}</li>
-      </ol>
-      {code?.link && <p className="tiny muted center">Scan with the phone camera and pay on Razorpay.</p>}
-      {code?.image && !paid && <a className="btn btn-ghost" href={code.image} target="_blank" rel="noopener noreferrer"><Ico n="qr" /> Open QR on Razorpay screen</a>}
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
-        {!paid && (confirmCash
-          ? <div className="card stack">
-            <p className="small">Close this QR before taking cash. If the customer says money was debited, tap Check now first.</p>
-            <div className="row2">
-              <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmCash(false)}>Keep QR</button>
-              <button className="btn btn-primary" disabled={busy} onClick={() => void toCash()}>{busy ? 'Checking…' : 'Close QR · take cash'}</button>
-            </div>
-          </div>
-          : <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>)}
+        {!paid && !confirmCash && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
         {message && <p className="msg bad" role="alert">{message}</p>}
         {!paid && <p className="q9-foot">Checked automatically every 3 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
       </div>
