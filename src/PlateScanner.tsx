@@ -158,12 +158,14 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
   const [capture, setCapture] = useState<'live' | 'busy' | 'done'>('live')
   const [captured, setCaptured] = useState<Captured>({})
   const [readerReady, setReaderReady] = useState(false)
+  const [success, setSuccess] = useState<ScanResult>()
 
   useEffect(() => { callbacks.current = { onRead, onClose, onQr } }, [onRead, onClose, onQr])
   useEffect(() => {
     let stopped = false
     let stream: MediaStream | undefined
     let qrTimer: ReturnType<typeof setTimeout> | undefined
+    let successTimer: ReturnType<typeof setTimeout> | undefined
     const readsQr = Boolean(callbacks.current.onQr)
     const preview = video.current!
     const panel = dialog.current!
@@ -281,8 +283,16 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
           const result = ranked.best && { ...ranked.best, alternatives: ranked.alternatives }
           setDraft(result)
           if (result && ranked.stable) {
+            // Hold the matching frame on screen with a short "got it" moment, then hand the plate over.
+            const frame = still.current
+            if (frame) {
+              frame.width = preview.videoWidth
+              frame.height = preview.videoHeight
+              frame.getContext('2d')?.drawImage(preview, 0, 0)
+            }
             stop()
-            callbacks.current.onRead(result)
+            setSuccess(result)
+            successTimer = setTimeout(() => callbacks.current.onRead(result), matchMedia('(prefers-reduced-motion: reduce)').matches ? 250 : 700)
             return
           }
           if (index > 7 && !result) setStatus(readsQr ? 'Hold the ticket QR or the whole plate steady, or tap the picture for a sharp photo.' : 'Move closer, reduce glare, tap the picture for a sharp photo, or enter the number manually.')
@@ -302,6 +312,7 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
     void scan()
     return () => {
       document.removeEventListener('visibilitychange', background)
+      clearTimeout(successTimer)
       stop()
       streamRef.current = undefined
       if (panel.open) panel.close()
@@ -376,17 +387,25 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
       <h2 id="plate-camera-title"><Ico n="scan" /> {onQr ? 'Scan ticket or plate' : 'Live plate scanner'}</h2>
       <div className="plate-video" style={cameraRatio ? { width: `min(100%, ${64 * cameraRatio}dvh)` } : undefined}>
         <video ref={video} autoPlay playsInline muted aria-label="Live camera preview" />
-        <canvas ref={still} className="plate-still" hidden={capture === 'live'} aria-label="Captured photo" />
+        <canvas ref={still} className="plate-still" hidden={capture === 'live' && !success} aria-label="Captured photo" />
         {cameraRatio > 0 && <button type="button" className="plate-tap" onClick={() => void takeStill()} disabled={capture !== 'live' || !readerReady}
           aria-label="Take a sharp photo of the plate" />}
-        {cameraRatio > 0 && <div className="plate-guide" aria-hidden="true" />}
-        {plateBox && <div className="plate-box" aria-hidden="true" style={{
+        {cameraRatio > 0 && <div className={'plate-guide' + (success ? ' done' : plateBox ? ' found' : '')} aria-hidden="true">
+          {capture === 'live' && !success && readerReady && <span className="plate-scanline" />}
+          <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
+        </div>}
+        {plateBox && !success && <div className="plate-box" aria-hidden="true" style={{
           left: `${plateBox.x * 100}%`, top: `${plateBox.y * 100}%`, width: `${plateBox.width * 100}%`, height: `${plateBox.height * 100}%`,
         }} />}
-        {torch !== 'none' && capture === 'live' && <button type="button" className={'plate-torch' + (torch === 'on' ? ' on' : '')} onClick={() => void toggleTorch()}
+        {success && <div className="plate-success" role="status">
+          <span className="plate-success-tick"><Ico n="check" size={26} /></span>
+          <b>{prettyPlate(success.plate)}</b>
+        </div>}
+        {torch !== 'none' && capture === 'live' && !success && <button type="button" className={'plate-torch' + (torch === 'on' ? ' on' : '')} onClick={() => void toggleTorch()}
           aria-pressed={torch === 'on'}>{torch === 'on' ? 'Light on' : 'Light off'}</button>}
       </div>
-      {capture === 'live' && (error ? <p role="alert" className="msg bad">{error}</p> : <p role="status" className="muted small">{status}</p>)}
+      {success && <p className="plate-read">Got it: <b>{prettyPlate(success.plate)}</b></p>}
+      {capture === 'live' && !success && (error ? <p role="alert" className="msg bad">{error}</p> : <p role="status" className="muted small">{status}</p>)}
       {capture === 'busy' && <p role="status" className="muted small">Taking photo…</p>}
       {capture === 'done' && !result && !captured.error && <p role="status" className="muted small">Reading the photo…</p>}
       {capture === 'done' && captured.error && <p role="alert" className="msg bad">{captured.error}</p>}
@@ -396,8 +415,8 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
         {result.alternatives.map(plate => <button key={plate} className="btn btn-ghost" onClick={() => onRead({ plate, confidence: result.confidence * .8, alternatives: [result.plate] })}>Use {prettyPlate(plate)}</button>)}
       </>}
       {capture === 'done' && <button className="btn btn-ghost" onClick={retake}><Ico n="scan" /> Retake</button>}
-      {qrNotice && capture === 'live' && <p className="msg info" role="status">{qrNotice}</p>}
-      {draft && capture === 'live' && <button className="btn btn-primary" onClick={() => onRead(draft)}>Review {prettyPlate(draft.plate)}</button>}
+      {qrNotice && capture === 'live' && !success && <p className="msg info" role="status">{qrNotice}</p>}
+      {draft && capture === 'live' && !success && <button className="btn btn-primary" onClick={() => onRead(draft)}>Review {prettyPlate(draft.plate)}</button>}
       <button className="btn btn-ghost" onClick={onClose}>Enter manually</button>
     </div>
   </dialog>
