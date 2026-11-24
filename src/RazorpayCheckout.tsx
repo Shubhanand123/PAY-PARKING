@@ -12,12 +12,31 @@ type CheckoutOptions = {
   currency: 'INR'
   name: string
   description: string
+  hidden?: { contact: boolean; email: boolean }
+  config?: {
+    display: {
+      blocks: Record<string, { name: string; instruments: { method: 'upi' }[] }>
+      sequence: string[]
+      preferences: { show_default_blocks: boolean }
+    }
+  }
   handler: (response: Signature) => void
   modal: { ondismiss: () => void }
 }
 type CheckoutInstance = { open: () => void; on: (event: 'payment.failed', handler: () => void) => void }
 type Checkout = new (options: CheckoutOptions) => CheckoutInstance
 type RazorpayWindow = Window & { Razorpay?: Checkout }
+
+const customerUpi: Pick<CheckoutOptions, 'hidden' | 'config'> = {
+  hidden: { contact: true, email: true },
+  config: {
+    display: {
+      blocks: { upi: { name: 'Pay via UPI', instruments: [{ method: 'upi' }] } },
+      sequence: ['block.upi'],
+      preferences: { show_default_blocks: false },
+    },
+  },
+}
 
 let loading: Promise<Checkout> | undefined
 
@@ -106,6 +125,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, onPa
         currency: order.currency,
         name,
         description: 'Parking ticket ' + ticketId,
+        ...(token ? customerUpi : {}),
         modal: { ondismiss: () => {
           if (verifying) return
           setMessage(previous => previous || 'Checkout closed. Resume payment or check its status.')
@@ -134,7 +154,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, onPa
 
   return <section className="stack razorpay-actions" aria-label="Online payment">
     <button className="btn btn-primary" disabled={busy || amount < 100} onClick={() => void open()}>
-      {busy ? 'Working…' : `${hasOrder && !token ? 'Resume online payment' : 'Pay online'} · ${rupees(amount)}`}
+      {busy ? 'Working…' : `${token ? 'Pay with UPI' : hasOrder ? 'Resume online payment' : 'Pay online'} · ${rupees(amount)}`}
     </button>
     {hasOrder && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
     {message && <p className={failed ? 'msg bad' : 'msg info'} role={failed ? 'alert' : 'status'}>{message}</p>}
