@@ -280,17 +280,26 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   const order = ticket.onlineCheckout
   if (action === 'switch-to-cash') {
     if (!actor) return reply({ error: 'Gate access is required.' }, 403)
-    if (!order?.linkUrl || !razorpayLinkId.test(order.orderId) || ticket.status !== 'inside') {
+    if (!order || ticket.status !== 'inside') {
       return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
     }
-    let link = await fetchRazorpayLink(razorpay, order.orderId)
-    if (link.status === 'created') {
-      try { link = await cancelRazorpayLink(razorpay, order.orderId) }
-      catch { link = await fetchRazorpayLink(razorpay, order.orderId) }
-    }
-    if (link.id !== order.orderId || link.amount !== order.amount || link.currency !== order.currency || link.reference_id !== order.receipt
-      || link.amount_paid !== 0 || link.payments?.length || !['cancelled', 'expired'].includes(link.status)) {
-      return reply({ error: 'Razorpay has not confirmed that the link is closed and unpaid. Check payment status before collecting cash.' }, 409)
+    if (!order.linkUrl) {
+      // Checkout order (Razorpay window): allowed only if Razorpay has no captured payment for it.
+      if (!razorpayOrderId.test(order.orderId)) return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
+      if (await findCapturedPayment(razorpay, order.orderId)) {
+        return reply({ error: 'Razorpay already received this payment. Tap Check payment status.' }, 409)
+      }
+    } else {
+      if (!razorpayLinkId.test(order.orderId)) return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
+      let link = await fetchRazorpayLink(razorpay, order.orderId)
+      if (link.status === 'created') {
+        try { link = await cancelRazorpayLink(razorpay, order.orderId) }
+        catch { link = await fetchRazorpayLink(razorpay, order.orderId) }
+      }
+      if (link.id !== order.orderId || link.amount !== order.amount || link.currency !== order.currency || link.reference_id !== order.receipt
+        || link.amount_paid !== 0 || link.payments?.length || !['cancelled', 'expired'].includes(link.status)) {
+        return reply({ error: 'Razorpay has not confirmed that the link is closed and unpaid. Check payment status before collecting cash.' }, 409)
+      }
     }
     for (let attempt = 0; attempt < 5; attempt++) {
       const { db, version } = await state()

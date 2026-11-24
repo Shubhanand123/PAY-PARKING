@@ -13,31 +13,14 @@ type CheckoutOptions = {
   currency: 'INR'
   name: string
   description: string
-  hidden?: { contact: boolean; email: boolean }
-  config?: {
-    display: {
-      blocks: Record<string, { name: string; instruments: { method: 'upi' }[] }>
-      sequence: string[]
-      preferences: { show_default_blocks: boolean }
-    }
-  }
+  theme?: { color: string }
+  prefill?: { contact?: string; email?: string }
   handler: (response: Signature) => void
   modal: { ondismiss: () => void }
 }
 type CheckoutInstance = { open: () => void; on: (event: 'payment.failed', handler: () => void) => void }
 type Checkout = new (options: CheckoutOptions) => CheckoutInstance
 type RazorpayWindow = Window & { Razorpay?: Checkout }
-
-const customerUpi: Pick<CheckoutOptions, 'hidden' | 'config'> = {
-  hidden: { contact: true, email: true },
-  config: {
-    display: {
-      blocks: { upi: { name: 'Pay via UPI', instruments: [{ method: 'upi' }] } },
-      sequence: ['block.upi'],
-      preferences: { show_default_blocks: false },
-    },
-  },
-}
 
 let loading: Promise<Checkout> | undefined
 
@@ -81,12 +64,13 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [failed, setFailed] = useState(false)
-  const [qrAmount, setQrAmount] = useState<number | null>(null)
+  const [showQr, setShowQr] = useState(false)
   const [confirmCash, setConfirmCash] = useState(false)
   const ticket = pos ? { ticket_id: ticketId } : { ticket_token: token }
 
+  // At the gate, keep checking an open order so the screen turns Paid even if the customer paid on their own phone.
   useEffect(() => {
-    if (!pos || !linkUrl) return
+    if (!pos || !hasOrder) return
     let active = true
     let checking = false
     const timer = window.setInterval(async () => {
@@ -95,11 +79,11 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
       try {
         const result = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: ticketId })
         if (active) onRevision?.(result.revision)
-      } catch { /* The manual check shows the provider response. */ }
+      } catch { /* not paid yet; the manual check shows the reason */ }
       finally { checking = false }
     }, 5000)
     return () => { active = false; clearInterval(timer) }
-  }, [pos, linkUrl, ticketId, onRevision])
+  }, [pos, hasOrder, ticketId, onRevision])
 
   function begin() {
     if (busyRef.current) return false
@@ -109,17 +93,11 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
     setFailed(false)
     return true
   }
-
-  function finish() {
-    busyRef.current = false
-    setBusy(false)
-  }
-
+  function finish() { busyRef.current = false; setBusy(false) }
   function showFailure(error: unknown) {
     setFailed(true)
     setMessage(error instanceof Error ? error.message : 'Could not verify the payment. Check payment status before retrying.')
   }
-
   function success(result: PaymentStatus) {
     onRevision?.(result.revision)
     setFailed(false)
@@ -138,20 +116,33 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
     try {
       const result = await callParkingPayment<{ revision: number }>('switch-to-cash', ticket)
       onRevision?.(result.revision)
-      setQrAmount(null)
+      setShowQr(false)
       setConfirmCash(false)
       setMessage('Online payment closed. You can now collect cash.')
     } catch (error) { showFailure(error) }
     finally { finish() }
   }
 
+  /** Lock the amount with a Razorpay order without opening the window, so the customer can pay from the ticket QR. */
+  async function customerPhone() {
+    if (!begin()) return
+    try {
+      await callParkingPayment<Order>('create-order', { ...ticket, amount, currency: 'INR', receipt: ticketId })
+      setShowQr(true)
+    } catch (error) { showFailure(error) }
+    finally { finish() }
+  }
+
+  /** Open Razorpay Standard Checkout (all payment methods; test mode shows Razorpay's test screens). */
   async function open() {
     if (!begin()) return
     try {
-      const Checkout = pos ? null : await loadCheckout()
-      const order = await callParkingPayment<Order>('create-order', { ...ticket, amount, currency: 'INR', receipt: ticketId, ...(pos ? { pos_qr: true } : {}) })
-      if (!Checkout) {
-        setQrAmount(order.amount)
+      const Checkout = await loadCheckout()
+      const order = await callParkingPayment<Order>('create-order', { ...ticket, amount, currency: 'INR', receipt: ticketId })
+      if (order.link_url) {
+        // An older UPI-link order is open for this ticket: continue on Razorpay's hosted page.
+        window.open(order.link_url, '_blank', 'noopener')
+        setMessage('Razorpay payment page opened. The ticket turns Paid once Razorpay confirms.')
         finish()
         return
       }
@@ -163,10 +154,10 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
         currency: order.currency,
         name,
         description: 'Parking ticket ' + ticketId,
-        ...customerUpi,
+        theme: { color: '#16245c' },
         modal: { ondismiss: () => {
           if (verifying) return
-          setMessage(previous => previous || 'Checkout closed. Resume payment or check its status.')
+          setMessage(previous => previous || 'Razorpay closed. Pay again, check the status, or switch to cash.')
           finish()
         } },
         handler: async ({ razorpay_payment_id, razorpay_order_id, razorpay_signature }) => {
@@ -181,7 +172,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
       })
       popup.on('payment.failed', () => {
         setFailed(true)
-        setMessage('Payment failed. Retry in Razorpay or close checkout and check the payment status.')
+        setMessage('Payment failed. Try again in the Razorpay window, or close it and check the payment status.')
       })
       popup.open()
     } catch (error) {
@@ -191,25 +182,23 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   }
 
   return <section className="stack razorpay-actions" aria-label="Online payment">
-    {!pos && linkUrl
-      ? <a className="btn btn-primary" href={linkUrl} target="_blank" rel="noopener noreferrer">Pay with UPI · {rupees(amount)}</a>
-      : qrAmount === null
-      ? <button className="btn btn-primary" disabled={busy || amount < 100} onClick={() => void open()}>
-        {busy ? 'Working…' : `${pos ? 'Show UPI payment QR' : 'Pay with UPI'} · ${rupees(amount)}`}
-      </button>
-      : <div className="card center payment-qr">
-        <h2>Pay {rupees(qrAmount)} with UPI</h2>
-        <div className="payment-qr-image"><QR text={ticketUrl(token)} size={240} /></div>
-        <p>Scan with your phone camera, then tap <b>Pay with UPI</b>.</p>
-        <button className="btn btn-ghost" disabled={busy} onClick={() => setQrAmount(null)}>Hide QR</button>
-      </div>}
-    {(hasOrder || qrAmount !== null) && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
-    {pos && linkUrl && (confirmCash
+    <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void open()}>
+      {busy ? 'Working…' : <>{hasOrder ? 'Resume Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
+    </button>
+    {pos && !showQr && !linkUrl && <button className="btn btn-ghost" disabled={busy} onClick={() => void customerPhone()}>Customer pays on their phone</button>}
+    {pos && showQr && <div className="card center payment-qr">
+      <h2>Customer scans to pay {rupees(amount)}</h2>
+      <div className="payment-qr-image"><QR text={ticketUrl(token)} size={240} /></div>
+      <p>They open their ticket and pay with Razorpay. This screen turns Paid by itself.</p>
+      <button className="btn btn-ghost" disabled={busy} onClick={() => setShowQr(false)}>Hide QR</button>
+    </div>}
+    {hasOrder && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
+    {pos && hasOrder && (confirmCash
       ? <div className="card stack">
-        <p>Close this UPI link before collecting cash. If the customer sees a debit or pending payment, check payment status first.</p>
+        <p>Close the online payment before taking cash. If the customer says money was debited, check payment status first.</p>
         <div className="row2">
-          <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmCash(false)}>Keep UPI</button>
-          <button className="btn btn-primary" disabled={busy} onClick={() => void switchToCash()}>{busy ? 'Checking…' : 'Close link'}</button>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmCash(false)}>Keep online</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void switchToCash()}>{busy ? 'Checking…' : 'Switch to cash'}</button>
         </div>
       </div>
       : <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmCash(true)}>Switch to cash</button>)}
