@@ -1,27 +1,34 @@
-import { useMemo, useState } from 'react'
+import { indianMobile } from './parking-auth'
+import { apiEnabled, callParking, openAccess } from './parking-api'
+import { publishTariff, saveSettings } from './actions'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
-  activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, publishTariff, reset, rupees, saveSettings,
+  activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, useNow } from './ui'
 import { Slip, StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
 
-type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings'
+type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings' | 'devices'
 
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
   const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
+  if (apiEnabled && !openAccess) tabs.push(['devices', 'Devices', 'gear'])
   return (
     <div className="owner">
       <nav className="tabs" aria-label="Owner sections">
         {tabs.map(([k, l, i]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)} aria-current={tab === k}><Ico n={i} size={18} />{l}</button>)}
       </nav>
+      <div className="owner-panel">
       {tab === 'overview' && <Overview db={db} />}
       {tab === 'tickets' && <Tickets db={db} />}
       {tab === 'audit' && <AuditLog db={db} />}
       {tab === 'rates' && <Rates db={db} me={me} toast={toast} />}
+      {tab === 'devices' && <div className="stack"><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /><DevicesTab toast={toast} /></div>}
       {tab === 'settings' && <SettingsTab db={db} me={me} toast={toast} />}
+      </div>
     </div>
   )
 }
@@ -34,7 +41,9 @@ function Overview({ db }: { db: DB }) {
     const inside = db.tickets.filter(t => t.status === 'inside' || t.status === 'paid')
     const tIn = db.tickets.filter(t => istDay(t.entryAt) === today)
     const tOut = db.tickets.filter(t => t.status === 'exited' && istDay(t.exitAt!) === today)
-    const cash = db.payments.filter(p => istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0)
+    const paymentsToday = db.payments.filter(p => istDay(p.at) === today)
+    const cash = paymentsToday.filter(p => p.method === 'cash').reduce((a, p) => a + p.amountPaise, 0)
+    const online = paymentsToday.filter(p => p.method === 'razorpay').reduce((a, p) => a + p.amountPaise, 0)
     const cancels = db.tickets.filter(t => t.status === 'cancelled' && istDay(t.cancelledAt!) === today).length
     const avg = tOut.length ? tOut.reduce((a, t) => a + (t.exitAt! - t.entryAt), 0) / tOut.length : 0
     const lostSlip = db.audit.filter(a => a.kind === 'lookup_plate' && istDay(a.at) === today).length
@@ -45,7 +54,7 @@ function Overview({ db }: { db: DB }) {
     const byCat = db.categories.map(c => ({ name: c.name, icon: c.icon, n: inside.filter(t => t.category === c.id).length, rev: db.payments.filter(p => istDay(p.at) === today && db.tickets.find(t => t.id === p.ticketId)?.category === c.id).reduce((a, p) => a + p.amountPaise, 0) }))
     const longStay = inside.filter(t => now - t.entryAt > 12 * 36e5)
     const openRunning = inside.reduce((a, t) => a + billFor(db, t, now).duePaise, 0)
-    return { inside, tIn, tOut, cash, cancels, avg, lostSlip, reprints, daily, hours, byCat, longStay, openRunning }
+    return { inside, tIn, tOut, cash, online, cancels, avg, lostSlip, reprints, daily, hours, byCat, longStay, openRunning }
   }, [db, now, today])
   const cap = db.settings.capacity
   const occ = cap ? s.inside.length / cap : 0
@@ -55,7 +64,7 @@ function Overview({ db }: { db: DB }) {
       <FlowStrip />
       <div className="kpis">
         <Kpi icon="p" label="Inside now" value={String(s.inside.length)} sub={cap ? `of ${cap} spaces` : ''} tone="info" />
-        <Kpi icon="cash" label="Cash today" value={rupees(s.cash)} sub={`${s.tOut.length} exits`} tone="ok" />
+        <Kpi icon="cash" label="Collections today" value={rupees(s.cash + s.online)} sub={`${rupees(s.cash)} cash · ${rupees(s.online)} online`} tone="ok" />
         <Kpi icon="car" label="Entries today" value={String(s.tIn.length)} sub={`${s.tOut.length} left`} />
         <Kpi icon="clock" label="Average stay" value={s.avg ? dur(s.avg) : '–'} sub="vehicles that left today" />
         <Kpi icon="rupee" label="Due from cars inside" value={rupees(s.openRunning)} sub="if all left now" />
@@ -79,7 +88,7 @@ function Overview({ db }: { db: DB }) {
       </div>
       <div className="grid2">
         <div className="card">
-          <h2>Cash today by vehicle type</h2>
+          <h2>Collections today by vehicle type</h2>
           <Donut parts={s.byCat.map((c, i) => ({ label: c.name, v: c.rev, color: `var(--color-chart-${i + 1})` }))} />
         </div>
         <div className="card">
@@ -94,7 +103,7 @@ function Overview({ db }: { db: DB }) {
 }
 
 function FlowStrip() {
-  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved, then printed with QR'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash, bill worked out'], ['out', 'Leave', 'Exit and receipt']]
+  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved, then printed with QR'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash or online'], ['out', 'Leave', 'Exit and receipt']]
   return (
     <div className="flow" aria-label="How a vehicle moves through the system">
       <svg className="flow-road" viewBox="0 0 600 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10H600" strokeDasharray="10 10" /></svg>
@@ -154,12 +163,12 @@ function Lines({ hours }: { hours: { h: number; i: number; o: number }[] }) {
 
 function Donut({ parts }: { parts: { label: string; v: number; color: string }[] }) {
   const tot = parts.reduce((a, p) => a + p.v, 0)
-  if (!tot) return <Empty text="No cash collected yet today." />
+  if (!tot) return <Empty text="No payments collected yet today." />
   let acc = 0
   const R = 52, C = 2 * Math.PI * R
   return (
     <div className="donut-wrap">
-      <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="Cash by vehicle type">
+      <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="Collections by vehicle type">
         {parts.filter(p => p.v).map((p, i) => { const len = (p.v / tot) * C; const el = <circle key={i} cx="70" cy="70" r={R} style={{ stroke: p.color, strokeDasharray: `${Math.max(0, len - 2)} ${C}`, strokeDashoffset: -acc }} />; acc += len; return el })}
         <text x="70" y="68" textAnchor="middle" className="g-v sm">{rupees(tot)}</text><text x="70" y="86" textAnchor="middle" className="g-s">today</text>
       </svg>
@@ -214,10 +223,10 @@ function Tickets({ db }: { db: DB }) {
 
 function csv(db: DB) {
   const today = istDay(Date.now())
-  const rows = [['ticket', 'plate', 'type', 'entry_ist', 'exit_ist', 'status', 'total_rupees', 'cash_rupees', 'entry_by', 'exit_by', 'tariff_version']]
+  const rows = [['ticket', 'plate', 'type', 'entry_ist', 'exit_ist', 'status', 'total_rupees', 'cash_rupees', 'razorpay_rupees', 'entry_by', 'exit_by', 'tariff_version']]
   db.tickets.filter(t => istDay(t.entryAt) === today || (t.exitAt && istDay(t.exitAt) === today)).forEach(t => rows.push([
     t.id, prettyPlate(t.plate), db.categories.find(c => c.id === t.category)?.name ?? '', fmtDT(t.entryAt), t.exitAt ? fmtDT(t.exitAt) : '', t.status,
-    t.totalPaise != null ? (t.totalPaise / 100).toFixed(2) : '', (db.payments.filter(p => p.ticketId === t.id).reduce((a, p) => a + p.amountPaise, 0) / 100).toFixed(2),
+    t.totalPaise != null ? (t.totalPaise / 100).toFixed(2) : '', ...(['cash', 'razorpay'] as const).map(method => (db.payments.filter(p => p.ticketId === t.id && p.method === method).reduce((a, p) => a + p.amountPaise, 0) / 100).toFixed(2)),
     t.entryBy, t.exitBy ?? '', String(db.tariffs.find(x => x.id === t.tariffId)?.version ?? ''),
   ]))
   const blob = new Blob([rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' })
@@ -227,7 +236,7 @@ function csv(db: DB) {
 // ---------- master audit ----------
 const KIND: Record<AuditKind, [string, 'ok' | 'warn' | 'bad' | 'info' | 'mute']> = {
   entry: ['Entry', 'info'], print: ['Print', 'mute'], reprint: ['Reprint', 'warn'], lookup_plate: ['Plate lookup', 'warn'], lookup_qr: ['Opened', 'mute'],
-  plate_fix: ['Plate fixed', 'warn'], payment: ['Cash', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
+  plate_fix: ['Plate fixed', 'warn'], payment: ['Payment', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
   settings: ['Settings', 'warn'], duplicate_blocked: ['Duplicate blocked', 'warn'], login: ['Login', 'mute'],
 }
 function AuditRow({ a }: { a: DB['audit'][number] }) {
@@ -242,7 +251,7 @@ function AuditLog({ db }: { db: DB }) {
   const list = db.audit.filter(a => (kind === 'all' || (kind === 'money' ? ['payment', 'exit'].includes(a.kind) : kind === 'risk' ? risk.includes(a.kind) : a.kind === kind))
     && (who === 'all' || a.by === who) && (!q || (a.text + a.ticketId).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
   const today = istDay(Date.now())
-  const per = db.staff.map(s => ({ s, cash: db.payments.filter(p => p.by === s.name && istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0), cancels: db.audit.filter(a => a.by === s.name && a.kind === 'cancel' && istDay(a.at) === today).length, reprints: db.audit.filter(a => a.by === s.name && a.kind === 'reprint' && istDay(a.at) === today).length }))
+  const per = db.staff.map(s => ({ s, cash: db.payments.filter(p => p.method === 'cash' && p.by === s.name && istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0), cancels: db.audit.filter(a => a.by === s.name && a.kind === 'cancel' && istDay(a.at) === today).length, reprints: db.audit.filter(a => a.by === s.name && a.kind === 'reprint' && istDay(a.at) === today).length }))
   return (
     <div className="stack">
       <div className="card">
@@ -253,7 +262,7 @@ function AuditLog({ db }: { db: DB }) {
       </div>
       <div className="card toolbar">
         <select className="field small-field" value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
-          <option value="risk">Things to check (cancels, reprints, lookups, rate changes)</option><option value="money">Money (cash, exits)</option><option value="all">Everything</option>
+          <option value="risk">Things to check (cancels, reprints, lookups, rate changes)</option><option value="money">Money (payments, exits)</option><option value="all">Everything</option>
           {Object.entries(KIND).map(([k, [l]]) => <option key={k} value={k}>Only: {l}</option>)}
         </select>
         <select className="field small-field" value={who} onChange={e => setWho(e.target.value)}><option value="all">All staff</option>{db.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select>
@@ -291,7 +300,7 @@ function Rates({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: 
             <td><input type="number" min={0} className="field small-field" value={rates[c.id].capPaise / 100} onChange={e => set(c.id, 'capPaise', e.target.value)} /></td></tr>)}</tbody>
         </table></div>
         <div className="toolbar"><input className="field small-field" placeholder="Note, e.g. Diwali rates" value={note} onChange={e => setNote(e.target.value)} />
-          <button className="btn btn-primary fit" disabled={!dirty} onClick={() => { saveStart(); try { publishTariff(me.id, grace, rates, note); setNote(''); saveEnd(true, 'Published') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Publish as v{tv.version + 1}</button></div>
+          <button className="btn btn-primary fit" disabled={!dirty} onClick={async () => { saveStart(); try { await publishTariff(me.id, grace, rates, note); setNote(''); saveEnd(true, 'Published') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Publish as v{tv.version + 1}</button></div>
       </div>
       <div className="grid2">
         <div className="card">
@@ -321,24 +330,271 @@ function Rates({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: 
 // ---------- settings ----------
 function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [s, setS] = useState<Settings>(db.settings)
+  const [saving, setSaving] = useState(false)
+  const changed = Object.keys(s).some(k => s[k as keyof Settings] !== db.settings[k as keyof Settings])
   const f = (k: keyof Settings, label: string, type = 'text') => <label className="setf"><span className="lbl">{label}</span><input className="field small-field" type={type} value={String(s[k])} onChange={e => setS({ ...s, [k]: type === 'number' ? Number(e.target.value) : e.target.value })} /></label>
   const tg = (k: 'payAtEntry' | 'cancelNeedsReason', label: string, help: string) => <label className="toggle"><input type="checkbox" checked={s[k]} onChange={e => setS({ ...s, [k]: e.target.checked })} /><span className="tg-ui" /><span><b>{label}</b><br /><span className="muted small">{help}</span></span></label>
   return (
     <div className="stack">
       <div className="card">
         <h2>How the gates work</h2>
-        {tg('payAtEntry', 'Pay at entry', 'Customer chooses hours and pays cash at entry. Leaving early costs the same; extra time is charged at exit.')}
+        {tg('payAtEntry', 'Allow cash before parking', 'After saving, the Entry gate offers Pay before parking or Pay at exit for each vehicle.')}
         {tg('cancelNeedsReason', 'Require a reason to cancel a ticket', 'Off: attendants can cancel without typing anything. Every cancel is still in the master audit.')}
       </div>
       <div className="card grid2">
         {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
       </div>
-      <button className="btn btn-primary" onClick={() => { saveStart(); try { saveSettings(me.id, s); saveEnd(true, 'Saved') } catch (e) { saveEnd(false, ''); toast((e as Error).message, true) } }}>Save settings</button>
-      <div className="card">
-        <h2>Demo data</h2>
-        <p className="muted small">This demo keeps its data in this browser only. Reset puts back the sample week.</p>
-        <button className="btn btn-ghost fit" onClick={() => { reset(); window.dispatchEvent(new Event('parking-change')); toast('Demo data reset') }}>Reset demo data</button>
-      </div>
+      <button className="btn btn-primary" disabled={!changed || saving} onClick={async () => {
+        setSaving(true)
+        saveStart()
+        try {
+          await saveSettings(me.id, s)
+          saveEnd(true, 'Saved')
+          toast('Parking settings saved')
+        } catch (error) {
+          saveEnd(false, '')
+          toast((error as Error).message, true)
+        } finally {
+          setSaving(false)
+        }
+      }}>{saving ? 'Saving…' : 'Save settings'}</button>
     </div>
   )
+}
+
+type ParkingDevice = {
+  id: string
+  label: string
+  role: 'owner' | 'entry' | 'exit' | 'both'
+  enabled: boolean
+  current: boolean
+  pending: boolean
+}
+
+function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [devices, setDevices] = useState<ParkingDevice[]>()
+  const [selected, setSelected] = useState<ParkingDevice>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
+  const [deviceName, setDeviceName] = useState('')
+  const [inviteLink, setInviteLink] = useState('')
+
+  useEffect(() => {
+    let active = true
+    void callParking<ParkingDevice[]>('listDevices').then(response => {
+      if (active) { setDevices(response.result); setError('') }
+    }).catch((failure: Error) => { if (active) setError(failure.message) })
+    return () => { active = false }
+  }, [refresh])
+
+  async function deactivate(device: ParkingDevice) {
+    setBusy(true)
+    try {
+      await callParking('deactivateDevice', [device.id])
+      setDevices(current => current?.map(item => item.id === device.id ? { ...item, enabled: false, pending: false } : item))
+      setSelected(undefined)
+      toast(`${device.label} deactivated`)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  async function createDeviceLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy || !deviceName.trim()) return
+    setBusy(true)
+    setInviteLink('')
+    try {
+      const { result } = await callParking<{ code: string }>('issuePosDeviceLink', [deviceName.trim(), 'both'])
+      setInviteLink(location.href.split('#')[0] + '#/pos/' + result.code)
+      setDeviceName('')
+      setRefresh(current => current + 1)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="devices-title">
+    <h2 id="devices-title">Parking devices</h2>
+    <form className="stack" onSubmit={event => void createDeviceLink(event)}>
+      <label className="setf"><span className="lbl">POS device name</span>
+        <input className="field small-field" maxLength={80} value={deviceName} onChange={event => setDeviceName(event.target.value)} placeholder="e.g. Main gate POS" required />
+      </label>
+      <button className="btn btn-primary" disabled={busy || !deviceName.trim()}>Create direct POS link</button>
+    </form>
+    {inviteLink && <div className="banner banner-info" role="status"><div className="stack">
+      <p>Open this private link to go straight to Entry and Exit. It works until you deactivate it here.</p>
+      <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy POS link</button>
+    </div></div>}
+    {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
+      : !devices ? <p role="status">Loading devices…</p>
+      : devices.length === 0 ? <p>No devices have been registered.</p>
+      : <ul className="device-list">{devices.map(device => <li key={device.id}>
+        <div><b>{device.label}</b><div className="muted small">{device.role === 'owner' ? 'Owner' : device.role === 'both' ? 'Entry and exit' : device.role === 'entry' ? 'Entry gate' : 'Exit gate'}{device.current ? ' · This browser' : ''}</div></div>
+        <Pill tone={device.enabled ? 'ok' : 'warn'}>{device.enabled ? 'Active' : device.pending ? 'Pending setup' : 'Inactive'}</Pill>
+        {(device.enabled || device.pending) && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>{device.pending ? 'Cancel link' : 'Deactivate'}</button>}
+      </li>)}</ul>}
+    {selected && <div className="banner banner-warn" role="group" aria-label="Confirm deactivation">
+      <div className="stack">
+        <p>Deactivate <b>{selected.label}</b>? This device will lose gate access.</p>
+        <div className="row2">
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(undefined)}>Keep active</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Deactivating…' : 'Deactivate device'}</button>
+        </div>
+      </div>
+    </div>}
+  </section>
+}
+
+type PosAccount = {
+  id: string
+  label: string
+  mobile: string
+  role: 'entry' | 'exit' | 'both'
+  enabled: boolean
+  pending: boolean
+}
+
+function AccountsTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [accounts, setAccounts] = useState<PosAccount[]>()
+  const [showForm, setShowForm] = useState(false)
+  const [label, setLabel] = useState('')
+  const [mobile, setMobile] = useState('')
+  const [gate, setGate] = useState<PosAccount['role']>('entry')
+  const [invite, setInvite] = useState<{ code: string; expiresAt: string; mobile: string }>()
+  const [selected, setSelected] = useState<PosAccount>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
+
+  useEffect(() => {
+    let current = true
+    void callParking<PosAccount[]>('listAccounts').then(response => {
+      if (current) { setAccounts(response.result); setError('') }
+    }).catch((failure: Error) => { if (current) setError(failure.message) })
+    return () => { current = false }
+  }, [refresh])
+
+  function openForm(account?: PosAccount) {
+    setShowForm(true)
+    setLabel(account?.label ?? '')
+    setMobile(account?.mobile ?? '')
+    setGate(account?.role ?? 'entry')
+    setInvite(undefined)
+  }
+
+  async function create(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const number = indianMobile(mobile)
+      const response = await callParking<{ code: string; expiresAt: string }>('issuePosCode', [number, gate, label.trim()])
+      setInvite({ ...response.result, mobile: number })
+      toast('POS setup code generated')
+      setShowForm(false)
+      setRefresh(n => n + 1)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  async function deactivate(account: PosAccount) {
+    setBusy(true)
+    try {
+      await callParking(account.pending ? 'cancelPosSetup' : 'disablePosAccount', [account.id])
+      setAccounts(current => current?.filter(item => !(item.id === account.id && account.pending)).map(item => item.id === account.id ? { ...item, enabled: false } : item))
+      setSelected(undefined)
+      toast(account.pending ? 'Setup code cancelled' : `${account.label} deactivated`)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="pos-accounts-title">
+    <h2 id="pos-accounts-title">POS accounts</h2>
+    <button className="btn btn-primary fit" disabled={busy} onClick={() => openForm()}>Create POS account</button>
+    {showForm && <form className="stack account-form" onSubmit={create}>
+      <h3>New POS account</h3>
+      <label className="setf"><span className="lbl">Operator or gate name</span>
+        <input className="field small-field" value={label} onChange={event => setLabel(event.target.value)} maxLength={80} required />
+      </label>
+      <label className="setf"><span className="lbl">Mobile number</span>
+        <input className="field small-field" type="tel" autoComplete="off" value={mobile} onChange={event => setMobile(event.target.value)} required />
+      </label>
+      <label className="setf"><span className="lbl">Gate access</span>
+        <select className="field small-field" value={gate} onChange={event => setGate(event.target.value as PosAccount['role'])}>
+          <option value="entry">Entry only</option><option value="exit">Exit only</option><option value="both">Entry + Exit</option>
+        </select>
+      </label>
+      <div className="row2"><button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)} disabled={busy}>Cancel</button><button className="btn btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Generate setup code'}</button></div>
+    </form>}
+    {invite && <div className="stack account-form">
+      <h3>Setup code for {invite.mobile}</h3>
+      <p className="muted small">The operator can enter this code under <b>Gate POS → Forgot password</b> to choose a PIN. It works once and expires at {fmtTime(Date.parse(invite.expiresAt))} IST.</p>
+      <code className="owner-code">{invite.code.match(/.{4}/g)?.join('-')}</code>
+      <div className="row2">
+        <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(invite.code).then(() => toast('Setup code copied'), () => toast('Could not copy the setup code', true))}>Copy setup code</button>
+        <button className="btn btn-ghost" onClick={() => setInvite(undefined)}>Done</button>
+      </div>
+    </div>}
+    {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
+      : !accounts ? <p role="status">Loading POS accounts…</p>
+      : accounts.length === 0 ? <p className="muted small">No POS accounts yet.</p>
+      : <ul className="device-list">{accounts.map(account => <li key={account.id}>
+        <div><b>{account.label}</b><div className="muted small">{account.mobile} · {account.role === 'both' ? 'Entry + Exit' : account.role === 'entry' ? 'Entry gate' : 'Exit gate'}</div></div>
+        <Pill tone={account.enabled ? 'ok' : 'warn'}>{account.pending ? 'Pending setup' : account.enabled ? 'Active' : 'Inactive'}</Pill>
+        {(account.enabled || account.pending) && <>
+          <button className="btn btn-ghost fit" disabled={busy} onClick={() => openForm(account)}>New setup code</button>
+          <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(account)}>{account.pending ? 'Cancel code' : 'Deactivate'}</button>
+        </>}
+      </li>)}</ul>}
+    {selected && <div className="banner banner-warn" role="group" aria-label="Confirm account deactivation"><div className="stack">
+      <p>{selected.pending ? 'Cancel the setup code for' : 'Deactivate'} <b>{selected.label}</b>?</p>
+      <div className="row2">
+        <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(undefined)}>Keep active</button>
+        <button className="btn btn-primary" disabled={busy} onClick={() => void deactivate(selected)}>{busy ? 'Saving…' : selected.pending ? 'Cancel setup code' : 'Deactivate account'}</button>
+      </div>
+    </div></div>}
+  </section>
+}
+
+function OwnerAccessTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
+  const [mobile, setMobile] = useState('')
+  const [selected, setSelected] = useState('')
+  const [invite, setInvite] = useState<{ code: string; expiresAt: string }>()
+  const [busy, setBusy] = useState(false)
+
+  async function generate(event: FormEvent) {
+    event.preventDefault()
+    if (!selected) {
+      try { setSelected(indianMobile(mobile)); setInvite(undefined) }
+      catch (failure) { toast((failure as Error).message, true) }
+      return
+    }
+    setBusy(true)
+    try {
+      const response = await callParking<{ code: string; expiresAt: string }>('issueOwnerCode', [selected])
+      setInvite(response.result)
+      setSelected('')
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="card stack" aria-labelledby="owner-access-title">
+    <h2 id="owner-access-title">Owner access</h2>
+    <p className="muted small">Generate a code so a trusted person can set or reset an Owner password for their mobile number.</p>
+    <form className="stack" onSubmit={generate}>
+      <label className="setf"><span className="lbl">Owner mobile number</span>
+        <input className="field small-field" type="tel" value={mobile} autoComplete="off" required disabled={busy}
+          onChange={event => { setMobile(event.target.value); setSelected(''); setInvite(undefined) }} />
+      </label>
+      {selected && <div className="banner banner-warn"><div>Anyone with this code and <b>{selected}</b> can set the password for full Owner access. Share the code privately.</div></div>}
+      <div className="row2">
+        <button className="btn btn-primary" disabled={busy}>{busy ? 'Generating…' : selected ? 'Confirm and generate code' : 'Generate recovery code'}</button>
+        {selected && <button className="btn btn-ghost" type="button" onClick={() => setSelected('')} disabled={busy}>Cancel</button>}
+      </div>
+    </form>
+    {invite && <div className="stack account-form">
+      <p>Enter this one-time code under <b>Owner dashboard → Forgot password</b>. It expires at {fmtTime(Date.parse(invite.expiresAt))} IST.</p>
+      <code className="owner-code">{invite.code}</code>
+      <button className="btn btn-ghost fit" onClick={() => void navigator.clipboard.writeText(invite.code).then(() => toast('Recovery code copied'), () => toast('Could not copy the recovery code', true))}>Copy code</button>
+    </div>}
+  </section>
 }

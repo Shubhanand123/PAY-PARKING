@@ -68,6 +68,8 @@ html,body{background:var(--color-bg-page)}
 .slip-tot{font-size:15px;border-top:1px solid #111;margin-top:4px;padding-top:4px}
 .slip-rules{text-align:left;font-size:10.5px}
 .slip-qr{margin:10px 0 2px}
+.payment-qr-image{box-sizing:border-box;width:264px;max-width:100%;padding:12px;background:#fff;margin:12px auto;border-radius:8px}
+.payment-qr-image>*{display:block;max-width:100%;height:auto;aspect-ratio:1}
 
 /* exit */
 .tk-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
@@ -331,3 +333,92 @@ html,body{background:var(--color-bg-page)}
   .cash-cel,.cash-cel *{animation:none!important;transition:none!important}
   .cash-cel{opacity:1}.cc-coin{transform:none}.cc-flip{transform:rotateY(180deg)}.cc-tick{stroke-dashoffset:0}
   .cc-label,.cc-amt,.cc-plate,.cc-hint{opacity:1}.cc-note,.cc-spark,.cc-ripple,.cc-glow{display:none}}
+
+.btn:focus-within { outline: 2px solid currentColor; outline-offset: 2px; }
+@media print {
+  body * { visibility: hidden; }
+  .slip, .slip * { visibility: visible; }
+  .slip { position: absolute; inset: 0 auto auto 0; box-shadow: none; }
+}
+
+.payment-choice { min-inline-size: 0; }
+.payment-choice legend { margin: 0; padding: 0 .45rem; }
+.payment-choice .stack { margin-top: .85rem; }
+.payment-option { display: flex; align-items: center; gap: .55rem; min-height: 48px; padding: .65rem; border-radius: .75rem; border: 1px solid var(--color-border-input); font-weight: 700; cursor: pointer; }
+.payment-option:has(input:checked) { background: var(--color-accent-subtle); border-color: var(--color-accent-solid); }
+.payment-option input { flex: none; accent-color: var(--color-accent-solid); }
+.device-list { margin: 0; padding: 0; list-style: none; }
+.device-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; padding: .85rem 0; border-top: 1px solid var(--color-border); }
+.device-list li > div:first-child { min-width: 9rem; flex: 1; }
+
+.signout { cursor: pointer; color: inherit; font: inherit; background: transparent; }
+
+.account-form { border: 1px solid var(--color-border); border-radius: .9rem; padding: 1rem; }
+.account-form h3 { margin: 0; }
+.owner-code { overflow-wrap: anywhere; font-size: 1rem; }
+
+.parking-login .login-card { gap: 12px; }
+.login-card h2, .login-card p { margin: 0; }
+.login-card .link { align-self: center; }
+.login-prefix { display: flex; align-items: center; gap: 10px; }
+.login-prefix span { font-size: 18px; font-weight: 750; color: var(--color-text-secondary); }
+.login-lang { min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; cursor: pointer; color: inherit; background: rgb(255 255 255 / 13%); }
+.login-workspaces { display: flex; gap: 5px; padding: 4px; margin: 0; border: 0; border-radius: 14px; background: var(--color-bg-subtle); min-inline-size: 0; }
+.login-workspaces button { flex: 1; min-height: 44px; padding: 4px 8px; border: 0; border-radius: 11px; background: transparent; color: var(--color-text-secondary); font-weight: 650; cursor: pointer; }
+.login-workspaces button[aria-pressed="true"] { background: var(--color-bg-surface); color: var(--color-text); box-shadow: var(--shadow-sm); }
+
+/* Size the UI to the viewport and keep long controls and data inside their cards. */
+.screen { width: 100%; min-width: 0; }
+.screen.wide { max-width: 1440px; }
+.screen:has(.hero.compact) { max-width: 760px; }
+.content, .card, .stack, .owner, .owner-panel, .grid2 > *, .kpis > * { min-inline-size: 0; }
+.btn { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; padding-block: .55rem; text-align: center; line-height: 1.25; }
+.btn.fit { max-inline-size: 100%; }
+.row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.brand, .kpi-v, .kpi-s, .device-list li > div:first-child { overflow-wrap: anywhere; min-width: 0; }
+.hero-row .signout { flex: none; }
+.tabs { min-width: 0; }
+.tab { white-space: normal; text-align: left; }
+.owner .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.owner .bars { gap: 5px; }
+.owner .bar-v { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 719px) {
+  .screen.wide { max-width: 620px; }
+  .owner .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+  .owner .tab { padding: 6px 4px; flex-direction: column; gap: 3px; font-size: .75rem; text-align: center; justify-content: center; min-height: 48px; }
+  .owner .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 4px; }
+  .owner .flow-road { display: none; }
+}
+@media (min-width: 720px) {
+  .owner .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1050px) {
+  .owner { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; gap: 18px; }
+  .owner .tabs { display: flex; position: sticky; top: 16px; flex-direction: column; overflow: visible; }
+  .owner .tab { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 380px) {
+  .row2 { grid-template-columns: minmax(0, 1fr); }
+  .btn { padding-inline: .65rem; font-size: .92rem; }
+  .card, .kpi { padding-inline: 12px; }
+  .switch { width: 100%; }
+  .sw-btn { flex: 1; min-width: 0; text-align: center; }
+}
+
+.plate-camera { width: min(calc(100% - 12px), 860px); max-height: calc(100dvh - 12px); padding: clamp(10px, 2.2vw, 18px); border: 0; border-radius: 18px; background: var(--color-bg-surface); color: var(--color-text); box-shadow: var(--shadow-lg); }
+.plate-camera::backdrop { background: rgb(0 0 0 / 72%); }
+.plate-camera h2 { display: flex; align-items: center; gap: .5rem; margin: 0; font-size: 1.05rem; }
+.plate-camera .msg, .plate-camera p { margin: 0; }
+.plate-video { position: relative; align-self: center; width: 100%; overflow: hidden; border-radius: 12px; background: #121922; }
+.plate-video video { display: block; width: 100%; height: auto; }
+.plate-guide { position: absolute; inset: 18% 4%; border: 2px solid #32e0bc; border-radius: 9px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%); pointer-events: none; }
+
+/* Big UPI QR on the POS: the customer scans it straight off the screen. */
+.upi-qr { display: grid; justify-items: center; gap: 10px; padding: 18px 12px; }
+.upi-amount { font-size: clamp(2.2rem, 9vw, 3rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.upi-qr-box { width: min(100%, 360px); aspect-ratio: 1; padding: 10px; background: #fff; border-radius: 16px; box-shadow: 0 0 0 1px rgb(0 0 0 / 8%); }
+.upi-qr-box img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; display: block; }
+.upi-hint { margin: 0; font-weight: 700; text-align: center; }
+.upi-wait { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--color-text-secondary); font-size: .9rem; }
+.upi-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent-solid, #2a55d4); animation: upi-pulse 1.2s ease-in-out infinite; }
+@keyframes upi-pulse { 0%, 100% { opacity: .3; transform: scale(.8) } 50% { opacity: 1; transform: scale(1.1) } }

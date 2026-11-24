@@ -7,3 +7,5 @@ dist
 !.env.example
 *.pem
 *.key
+
+!.env.production
