@@ -1,8 +1,15 @@
+import {
+  createRazorpayOrder, fetchRazorpayPayment, findCapturedPayment, RazorpayServiceError,
+  razorpayOrderId, razorpayPaymentId, razorpaySignature, verifyRazorpaySignature,
+} from './razorpay.ts'
 import { loginAlias, pairedPassword } from '../../../src/parking-identity.ts'
 import * as parking from '../../../src/engine.ts'
 
 const endpoint = Deno.env.get('SUPABASE_URL')!
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const keyId = Deno.env.get('RAZORPAY_KEY_ID')
+const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
+const razorpay = keyId && keySecret ? { keyId, keySecret } : undefined
 const headers = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'content-type, x-device-key, authorization',
@@ -190,6 +197,111 @@ async function state() {
   return created
 }
 
+function publishState(current: State, role: string) {
+  return { ...current, role, db: { ...current.db, razorpayEnabled: Boolean(razorpay) } }
+}
+
+async function saveState(db: parking.DB, version: number) {
+  const [saved] = await database<State[]>(statePath + '&version=eq.' + version, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ db, version: version + 1 }),
+  })
+  return saved
+}
+
+type PaymentRoute = 'create-order' | 'verify-payment' | 'check-payment'
+
+function isPaymentRoute(value: unknown): value is PaymentRoute {
+  return value === 'create-order' || value === 'verify-payment' || value === 'check-payment'
+}
+
+async function paymentRoute(action: PaymentRoute, payload: Record<string, unknown>, actor?: { role: string; label?: string }) {
+  if (!razorpay) return reply({ error: 'Online checkout is unavailable.' }, 503)
+  const token = payload.ticket_token
+  const ticketId = payload.ticket_id
+  if (!actor && (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token))) return reply({ error: 'Ticket access is required.' }, 401)
+  if (actor && !['owner', 'exit', 'both'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
+  if (actor && (typeof ticketId !== 'string' || !/^T-\d{6,}$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
+  const select = (db: parking.DB) => db.tickets.find(item => actor ? item.id === ticketId : item.token === token)
+  const initial = await state()
+  const ticket = select(initial.db)
+  if (!ticket) return reply({ error: 'Ticket not found.' }, actor ? 404 : 401)
+
+  if (action === 'create-order') {
+    const { amount, currency, receipt } = payload
+    if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount < 100 || currency !== 'INR' || receipt !== ticket.id) {
+      return reply({ error: 'Supply the ticket receipt, INR, and an amount of at least 100 paise.' }, 400)
+    }
+    let providerOrder: { checkout: parking.OnlineCheckout; revision: number } | undefined
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { db, version } = attempt === 0 ? initial : await state()
+      const fresh = select(db)
+      if (!fresh || fresh.status !== 'inside') return reply({ error: 'This ticket is no longer awaiting payment.' }, 409)
+      if (fresh.onlineCheckout) {
+        const order = fresh.onlineCheckout
+        if (order.amount !== amount) return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
+        return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId })
+      }
+      if (!actor) return reply({ error: 'Ask the exit attendant to enable online payment for this ticket.' }, 409)
+      const billedAt = Date.now()
+      const bill = parking.billFor(db, fresh, billedAt)
+      if (amount !== bill.duePaise || providerOrder && providerOrder.revision !== fresh.rev) {
+        return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
+      }
+      if (!providerOrder) {
+        const receiptId = fresh.id + '-' + crypto.randomUUID().slice(0, 8)
+        const created = await createRazorpayOrder(razorpay, amount, currency, receiptId)
+        if (!razorpayOrderId.test(created.id) || created.amount !== amount || created.currency !== currency || created.receipt !== receiptId) {
+          throw new RazorpayServiceError('Razorpay returned an unexpected order.')
+        }
+        providerOrder = { revision: fresh.rev, checkout: { orderId: created.id, amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } }
+      }
+      fresh.onlineCheckout = providerOrder.checkout
+      fresh.rev++
+      const saved = await saveState(db, version)
+      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, snapshot: publishState(saved, actor.role) })
+    }
+    return reply({ error: 'The ticket changed. Refresh and retry.' }, 409)
+  }
+
+  const order = ticket.onlineCheckout
+  if (action === 'verify-payment') {
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = payload
+    if (typeof razorpay_payment_id !== 'string' || !razorpayPaymentId.test(razorpay_payment_id)
+      || typeof razorpay_order_id !== 'string' || !razorpayOrderId.test(razorpay_order_id)
+      || typeof razorpay_signature !== 'string' || !razorpaySignature.test(razorpay_signature)) {
+      return reply({ error: 'The payment ID, order ID and signature are required.' }, 400)
+    }
+    if (!order || razorpay_order_id !== order.orderId || !await verifyRazorpaySignature(razorpay.keySecret, order.orderId, razorpay_payment_id, razorpay_signature)) {
+      return reply({ error: 'Payment signature or order did not match the parking ticket.' }, 400)
+    }
+  }
+  if (!order) return reply({ error: 'This ticket has no online payment order.' }, 409)
+  const payment = action === 'verify-payment'
+    ? await fetchRazorpayPayment(razorpay, payload.razorpay_payment_id as string)
+    : await findCapturedPayment(razorpay, order.orderId)
+  if (!payment || payment.status !== 'captured') return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
+  if (!razorpayPaymentId.test(payment.id) || (action === 'verify-payment' && payment.id !== payload.razorpay_payment_id)
+    || payment.order_id !== order.orderId || payment.amount !== order.amount || payment.currency !== order.currency || (payment.amount_refunded ?? 0) !== 0) {
+    return reply({ error: 'Razorpay payment details did not match the parking order.' }, 400)
+  }
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { db, version } = await state()
+    const fresh = select(db)
+    if (!fresh) return reply({ error: 'Ticket not found.' }, 404)
+    const staff = db.staff.find(person => person.id === (actor?.role === 'owner' ? 'owner' : 'sunil'))!
+    const settled = parking.settleOnlinePayment(db, { ...staff, name: actor?.label ?? 'Razorpay' }, fresh, order.orderId, payment.id)
+    const saved = await saveState(db, version)
+    if (saved) return reply({
+      success: true, payment_id: payment.id, status: settled.status, revision: settled.rev,
+      ...(actor ? { snapshot: publishState(saved, actor.role) } : {}),
+    })
+  }
+  return reply({ error: 'Could not update the ticket. Check payment again before collecting cash.' }, 409)
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
   if (request.method !== 'POST') return reply({ error: 'Method not allowed.' }, 405)
@@ -197,8 +309,16 @@ Deno.serve(async request => {
     const raw = await request.text()
     if (raw.length > 16000) return reply({ error: 'Request is too large.' }, 413)
     const body = JSON.parse(raw)
-    const { action, args } = body ?? {}
+    const subroute = new URL(request.url).pathname.split('/').at(-1)
+    const action = isPaymentRoute(subroute) ? subroute : body?.action
+    const args = isPaymentRoute(subroute) ? [] : body?.args
     if (typeof action !== 'string' || !Array.isArray(args)) return reply({ error: 'Invalid request.' }, 400)
+    if (isPaymentRoute(action) && (!body || typeof body !== 'object' || Array.isArray(body))) {
+      return reply({ error: 'Send a JSON payment request.' }, 400)
+    }
+    if (isPaymentRoute(action) && body.ticket_token !== undefined && !request.headers.has('Authorization') && !request.headers.has('X-Device-Key')) {
+      return await paymentRoute(action, body)
+    }
     if (action === 'customer') {
       if (typeof args[0] !== 'string' || !/^[a-f0-9]{32}$/.test(args[0])) return reply({ error: 'Ticket not found.' }, 404)
       const [current] = await read()
@@ -206,7 +326,7 @@ Deno.serve(async request => {
       if (!ticket) return reply({ error: 'Ticket not found.' }, 404)
       const db = current.db
       const { plate, entryBy, exitBy, cancelledBy, cancelReason, ...safeTicket } = ticket
-      return reply({ db: { ...db, seq: 0, tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }], payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })), tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [] } })
+      return reply({ db: { ...db, razorpayEnabled: Boolean(razorpay), seq: 0, tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }], payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })), tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [] } })
     }
     if (action === 'redeemOwnerCode') return await redeemOwnerCode(args)
     if (action === 'redeemPosCode') return await redeemPosCode(args)
@@ -245,6 +365,7 @@ Deno.serve(async request => {
       role = device.role
     }
 
+    if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label })
     if (action === 'issueOwnerCode') {
       if (role !== 'owner') return reply({ error: 'Only the owner can issue a recovery code.' }, 403)
       const [mobile] = args
@@ -328,7 +449,7 @@ Deno.serve(async request => {
       if (!changed.length) return reply({ error: 'This gate device is already inactive or unavailable.' }, 409)
       return reply({ result: true })
     }
-    if (action === 'snapshot') return reply({ snapshot: { ...await state(), role } })
+    if (action === 'snapshot') return reply({ snapshot: publishState(await state(), role) })
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
     const command = actions[action as keyof typeof actions]
     const allowed = role === 'both'
@@ -351,15 +472,12 @@ Deno.serve(async request => {
         const label = signedIn?.app_metadata?.parking_label
         return commandFn(snapshot, label ? { ...staff, name: label } : staff, ...args)
       })
-      const [saved] = await database<State[]>(statePath + '&version=eq.' + version, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ db, version: version + 1 }),
-      })
-      if (saved) return reply({ result, snapshot: { ...saved, role } })
+      const saved = await saveState(db, version)
+      if (saved) return reply({ result, snapshot: publishState(saved, role) })
     }
     return reply({ error: 'Another gate changed the records. Refresh and try again.' }, 409)
   } catch (error) {
+    if (error instanceof RazorpayServiceError) return reply({ error: error.message }, 500)
     if (error instanceof SyntaxError) return reply({ error: 'Invalid JSON.' }, 400)
     if (error instanceof parking.Refused) return reply({ error: error.message }, 409)
     return reply({ error: 'Parking server unavailable. Check the connection before retrying.' }, 503)

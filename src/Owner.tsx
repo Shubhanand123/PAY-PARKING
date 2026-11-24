@@ -41,7 +41,9 @@ function Overview({ db }: { db: DB }) {
     const inside = db.tickets.filter(t => t.status === 'inside' || t.status === 'paid')
     const tIn = db.tickets.filter(t => istDay(t.entryAt) === today)
     const tOut = db.tickets.filter(t => t.status === 'exited' && istDay(t.exitAt!) === today)
-    const cash = db.payments.filter(p => istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0)
+    const paymentsToday = db.payments.filter(p => istDay(p.at) === today)
+    const cash = paymentsToday.filter(p => p.method === 'cash').reduce((a, p) => a + p.amountPaise, 0)
+    const online = paymentsToday.filter(p => p.method === 'razorpay').reduce((a, p) => a + p.amountPaise, 0)
     const cancels = db.tickets.filter(t => t.status === 'cancelled' && istDay(t.cancelledAt!) === today).length
     const avg = tOut.length ? tOut.reduce((a, t) => a + (t.exitAt! - t.entryAt), 0) / tOut.length : 0
     const lostSlip = db.audit.filter(a => a.kind === 'lookup_plate' && istDay(a.at) === today).length
@@ -52,7 +54,7 @@ function Overview({ db }: { db: DB }) {
     const byCat = db.categories.map(c => ({ name: c.name, icon: c.icon, n: inside.filter(t => t.category === c.id).length, rev: db.payments.filter(p => istDay(p.at) === today && db.tickets.find(t => t.id === p.ticketId)?.category === c.id).reduce((a, p) => a + p.amountPaise, 0) }))
     const longStay = inside.filter(t => now - t.entryAt > 12 * 36e5)
     const openRunning = inside.reduce((a, t) => a + billFor(db, t, now).duePaise, 0)
-    return { inside, tIn, tOut, cash, cancels, avg, lostSlip, reprints, daily, hours, byCat, longStay, openRunning }
+    return { inside, tIn, tOut, cash, online, cancels, avg, lostSlip, reprints, daily, hours, byCat, longStay, openRunning }
   }, [db, now, today])
   const cap = db.settings.capacity
   const occ = cap ? s.inside.length / cap : 0
@@ -62,7 +64,7 @@ function Overview({ db }: { db: DB }) {
       <FlowStrip />
       <div className="kpis">
         <Kpi icon="p" label="Inside now" value={String(s.inside.length)} sub={cap ? `of ${cap} spaces` : ''} tone="info" />
-        <Kpi icon="cash" label="Cash today" value={rupees(s.cash)} sub={`${s.tOut.length} exits`} tone="ok" />
+        <Kpi icon="cash" label="Collections today" value={rupees(s.cash + s.online)} sub={`${rupees(s.cash)} cash · ${rupees(s.online)} online`} tone="ok" />
         <Kpi icon="car" label="Entries today" value={String(s.tIn.length)} sub={`${s.tOut.length} left`} />
         <Kpi icon="clock" label="Average stay" value={s.avg ? dur(s.avg) : '–'} sub="vehicles that left today" />
         <Kpi icon="rupee" label="Due from cars inside" value={rupees(s.openRunning)} sub="if all left now" />
@@ -86,7 +88,7 @@ function Overview({ db }: { db: DB }) {
       </div>
       <div className="grid2">
         <div className="card">
-          <h2>Cash today by vehicle type</h2>
+          <h2>Collections today by vehicle type</h2>
           <Donut parts={s.byCat.map((c, i) => ({ label: c.name, v: c.rev, color: `var(--color-chart-${i + 1})` }))} />
         </div>
         <div className="card">
@@ -101,7 +103,7 @@ function Overview({ db }: { db: DB }) {
 }
 
 function FlowStrip() {
-  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved, then printed with QR'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash, bill worked out'], ['out', 'Leave', 'Exit and receipt']]
+  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved, then printed with QR'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash or online'], ['out', 'Leave', 'Exit and receipt']]
   return (
     <div className="flow" aria-label="How a vehicle moves through the system">
       <svg className="flow-road" viewBox="0 0 600 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10H600" strokeDasharray="10 10" /></svg>
@@ -161,12 +163,12 @@ function Lines({ hours }: { hours: { h: number; i: number; o: number }[] }) {
 
 function Donut({ parts }: { parts: { label: string; v: number; color: string }[] }) {
   const tot = parts.reduce((a, p) => a + p.v, 0)
-  if (!tot) return <Empty text="No cash collected yet today." />
+  if (!tot) return <Empty text="No payments collected yet today." />
   let acc = 0
   const R = 52, C = 2 * Math.PI * R
   return (
     <div className="donut-wrap">
-      <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="Cash by vehicle type">
+      <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="Collections by vehicle type">
         {parts.filter(p => p.v).map((p, i) => { const len = (p.v / tot) * C; const el = <circle key={i} cx="70" cy="70" r={R} style={{ stroke: p.color, strokeDasharray: `${Math.max(0, len - 2)} ${C}`, strokeDashoffset: -acc }} />; acc += len; return el })}
         <text x="70" y="68" textAnchor="middle" className="g-v sm">{rupees(tot)}</text><text x="70" y="86" textAnchor="middle" className="g-s">today</text>
       </svg>
@@ -221,10 +223,10 @@ function Tickets({ db }: { db: DB }) {
 
 function csv(db: DB) {
   const today = istDay(Date.now())
-  const rows = [['ticket', 'plate', 'type', 'entry_ist', 'exit_ist', 'status', 'total_rupees', 'cash_rupees', 'entry_by', 'exit_by', 'tariff_version']]
+  const rows = [['ticket', 'plate', 'type', 'entry_ist', 'exit_ist', 'status', 'total_rupees', 'cash_rupees', 'razorpay_rupees', 'entry_by', 'exit_by', 'tariff_version']]
   db.tickets.filter(t => istDay(t.entryAt) === today || (t.exitAt && istDay(t.exitAt) === today)).forEach(t => rows.push([
     t.id, prettyPlate(t.plate), db.categories.find(c => c.id === t.category)?.name ?? '', fmtDT(t.entryAt), t.exitAt ? fmtDT(t.exitAt) : '', t.status,
-    t.totalPaise != null ? (t.totalPaise / 100).toFixed(2) : '', (db.payments.filter(p => p.ticketId === t.id).reduce((a, p) => a + p.amountPaise, 0) / 100).toFixed(2),
+    t.totalPaise != null ? (t.totalPaise / 100).toFixed(2) : '', ...(['cash', 'razorpay'] as const).map(method => (db.payments.filter(p => p.ticketId === t.id && p.method === method).reduce((a, p) => a + p.amountPaise, 0) / 100).toFixed(2)),
     t.entryBy, t.exitBy ?? '', String(db.tariffs.find(x => x.id === t.tariffId)?.version ?? ''),
   ]))
   const blob = new Blob([rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' })
@@ -234,7 +236,7 @@ function csv(db: DB) {
 // ---------- master audit ----------
 const KIND: Record<AuditKind, [string, 'ok' | 'warn' | 'bad' | 'info' | 'mute']> = {
   entry: ['Entry', 'info'], print: ['Print', 'mute'], reprint: ['Reprint', 'warn'], lookup_plate: ['Plate lookup', 'warn'], lookup_qr: ['Opened', 'mute'],
-  plate_fix: ['Plate fixed', 'warn'], payment: ['Cash', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
+  plate_fix: ['Plate fixed', 'warn'], payment: ['Payment', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
   settings: ['Settings', 'warn'], duplicate_blocked: ['Duplicate blocked', 'warn'], login: ['Login', 'mute'],
 }
 function AuditRow({ a }: { a: DB['audit'][number] }) {
@@ -249,7 +251,7 @@ function AuditLog({ db }: { db: DB }) {
   const list = db.audit.filter(a => (kind === 'all' || (kind === 'money' ? ['payment', 'exit'].includes(a.kind) : kind === 'risk' ? risk.includes(a.kind) : a.kind === kind))
     && (who === 'all' || a.by === who) && (!q || (a.text + a.ticketId).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
   const today = istDay(Date.now())
-  const per = db.staff.map(s => ({ s, cash: db.payments.filter(p => p.by === s.name && istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0), cancels: db.audit.filter(a => a.by === s.name && a.kind === 'cancel' && istDay(a.at) === today).length, reprints: db.audit.filter(a => a.by === s.name && a.kind === 'reprint' && istDay(a.at) === today).length }))
+  const per = db.staff.map(s => ({ s, cash: db.payments.filter(p => p.method === 'cash' && p.by === s.name && istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0), cancels: db.audit.filter(a => a.by === s.name && a.kind === 'cancel' && istDay(a.at) === today).length, reprints: db.audit.filter(a => a.by === s.name && a.kind === 'reprint' && istDay(a.at) === today).length }))
   return (
     <div className="stack">
       <div className="card">
@@ -260,7 +262,7 @@ function AuditLog({ db }: { db: DB }) {
       </div>
       <div className="card toolbar">
         <select className="field small-field" value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
-          <option value="risk">Things to check (cancels, reprints, lookups, rate changes)</option><option value="money">Money (cash, exits)</option><option value="all">Everything</option>
+          <option value="risk">Things to check (cancels, reprints, lookups, rate changes)</option><option value="money">Money (payments, exits)</option><option value="all">Everything</option>
           {Object.entries(KIND).map(([k, [l]]) => <option key={k} value={k}>Only: {l}</option>)}
         </select>
         <select className="field small-field" value={who} onChange={e => setWho(e.target.value)}><option value="all">All staff</option>{db.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select>

@@ -25,7 +25,8 @@ export type Settings = {
   capacity: number
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
-export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash'; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
+export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
+export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number }
 export type Ticket = {
   id: string            // human ticket number, e.g. T-000123
   token: string         // opaque QR token
@@ -37,6 +38,7 @@ export type Ticket = {
   prepaidHours: number  // 0 if not pay-at-entry
   status: Status
   exitGate?: string; exitBy?: string; exitAt?: number
+  onlineCheckout?: OnlineCheckout
   billedAt?: number     // time the exit bill was locked
   totalPaise?: number   // full charge for the stay
   cancelledBy?: string; cancelledAt?: number; cancelReason?: string
@@ -47,6 +49,7 @@ export type AuditKind = 'entry' | 'print' | 'reprint' | 'lookup_plate' | 'lookup
 export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticketId?: string; text: string; amountPaise?: number }
 
 export type DB = {
+  razorpayEnabled?: boolean
   seq: number
   staff: Staff[]
   categories: Category[]
@@ -157,7 +160,7 @@ export function prepaidPrice(hours: number, rate: Rate) {
 export function billFor(db: DB, t: Ticket, at: number): Bill {
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const rate = tv.rates[t.category]
-  const minutes = Math.floor(((t.exitAt ?? at) - t.entryAt) / MIN)
+  const minutes = Math.floor(((t.billedAt ?? t.onlineCheckout?.billedAt ?? t.exitAt ?? at) - t.entryAt) / MIN)
   const c = charge(minutes, rate, tv.graceMin)
   const prepaid = db.payments.filter(p => p.ticketId === t.id && p.kind === 'prepaid').reduce((s, p) => s + p.amountPaise, 0)
   const paidExit = db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').reduce((s, p) => s + p.amountPaise, 0)
@@ -251,9 +254,9 @@ function newTicket(db: DB, plate: string, category: string, staffId: string, at:
   db.tickets.push(t)
   return t
 }
-function addPayment(db: DB, t: Ticket, amountPaise: number, staffId: string, at: number, kind: Payment['kind']) {
+function addPayment(db: DB, t: Ticket, amountPaise: number, staffId: string, at: number, kind: Payment['kind'], method: Payment['method'] = 'cash') {
   const s = db.staff.find(x => x.id === staffId)!
-  const p: Payment = { id: uid(), ticketId: t.id, amountPaise, method: 'cash', at, by: s.name, kind, receiptNo: 'R-' + String(db.payments.length + 1).padStart(6, '0') }
+  const p: Payment = { id: uid(), ticketId: t.id, amountPaise, method, at, by: s.name, kind, receiptNo: 'R-' + String(db.payments.length + 1).padStart(6, '0') }
   db.payments.push(p)
   return p
 }
@@ -333,6 +336,7 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
   const t = db.tickets.find(x => x.id === id)
   if (!t) throw new Refused('Ticket not found.')
   if (t.status !== 'inside') throw new Refused(t.status === 'paid' ? 'Already paid. Another attendant collected this.' : `Ticket is ${t.status}.`)
+  if (t.onlineCheckout) throw new Refused('An online order is open. Resume online checkout or check payment before letting the vehicle leave.')
   if (t.rev !== rev) throw new Refused('This ticket changed on another device. Reload it.')
   const now = Date.now()
   const b = billFor(db, t, now)
@@ -341,6 +345,25 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
   t.status = 'paid'; t.billedAt = now; t.totalPaise = b.totalPaise; t.rev++
   log(db, s, 'payment', b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
   return t
+}
+
+export function settleOnlinePayment(db: DB, staff: Staff, ticket: Ticket, orderId: string, paymentId: string) {
+  const order = ticket.onlineCheckout
+  if (!order || order.orderId !== orderId) throw new Refused('The payment does not match this ticket.')
+  const previous = db.payments.find(payment => payment.providerPaymentId === paymentId)
+  if (previous?.ticketId === ticket.id && (ticket.status === 'paid' || ticket.status === 'exited')) return ticket
+  if (previous || ticket.status !== 'inside') throw new Refused('This ticket cannot accept another payment.')
+
+  const now = Date.now()
+  const payment = addPayment(db, ticket, order.amount, staff.id, now, 'exit', 'razorpay')
+  payment.by = staff.name
+  payment.providerPaymentId = paymentId
+  ticket.status = 'paid'
+  ticket.billedAt = order.billedAt
+  ticket.totalPaise = order.totalPaise
+  ticket.rev++
+  log(db, staff, 'payment', `Razorpay ${rupees(order.amount)} received`, ticket.id, order.amount)
+  return ticket
 }
 
 export const recordExit = (db: DB, s: Staff, id: string) => {
@@ -356,6 +379,7 @@ export const cancelTicket = (db: DB, s: Staff, id: string, reason: string) => {
   const t = db.tickets.find(x => x.id === id)
   if (!t) throw new Refused('Ticket not found.')
   if (t.status === 'exited' || t.status === 'cancelled') throw new Refused(`Ticket is already ${t.status}.`)
+  if (t.onlineCheckout) throw new Refused('This ticket has an online order. Reconcile it before cancelling.')
   if (db.settings.cancelNeedsReason && !reason.trim()) throw new Refused('A reason is required (Owner setting).')
   t.status = 'cancelled'; t.cancelledAt = Date.now(); t.cancelledBy = s.name; t.cancelReason = reason; t.rev++
   log(db, s, 'cancel', `Cancelled${reason ? `: ${reason}` : ' (no reason)'}`, id)

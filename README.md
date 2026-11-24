@@ -85,3 +85,29 @@ and capture sessions. Include motorcycles with two-line plates, commercial and
 EV plates, glare, blur, distance and nighttime captures. A compatible model
 can be served by setting `VITE_PLATE_OCR_MODEL_PATH` to the directory containing
 `indplate.traineddata.gz`.
+
+### Razorpay Standard Checkout
+
+The Deno Edge Function uses Razorpay's REST API and Web Crypto. No Node SDK is
+needed. Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in Supabase Edge Functions
+secrets. For local Edge Function serving, put both in the ignored root `.env`
+and pass `--env-file .env` to `supabase functions serve parking` in a local
+Supabase environment. The browser gets only the key ID from the order endpoint.
+
+The payment routes are `POST /functions/v1/parking/create-order`,
+`POST /functions/v1/parking/verify-payment`, and
+`POST /functions/v1/parking/check-payment`. They use the existing parking
+ticket and payment storage. No payment migration is needed.
+
+Run `node --test tests/razorpay.test.ts` for the isolated API test. To test the
+modal end to end, configure Razorpay Test Mode keys and automatic capture. Open
+a test ticket with at least ₹1 due in Exit and select **Pay online**. Complete
+the payment with a Razorpay test method. Confirm the ticket shows **Paid**, then
+record the vehicle leaving. Close the modal to test cancellation or use
+**Check payment status** if the original callback never arrived.
+
+The exit operator opens the order and locks the fee. Once the order exists,
+the customer can pay from the ticket QR. An open online order blocks cash and
+ticket cancellation to avoid double collection. Resume the order or check
+its status before proceeding. Keep test orders on test tickets and reconcile
+them before changing the hosted credentials from test to live mode.

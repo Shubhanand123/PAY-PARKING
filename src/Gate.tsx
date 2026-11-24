@@ -1,3 +1,4 @@
+import { RazorpayCheckout } from './RazorpayCheckout'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
@@ -39,7 +40,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
         <hr />
         {b.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{rupees(l.paise)}</b></div>)}
         <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(t.totalPaise ?? b.totalPaise)}</b></div>
-        <div className="slip-row"><span>Paid</span><b>{rupees(pays.reduce((s, p) => s + p.amountPaise, 0))} cash</b></div>
+        {pays.map(payment => <div key={payment.id} className="slip-row"><span>{payment.method === 'razorpay' ? 'Razorpay' : 'Cash paid'}</span><b>{rupees(payment.amountPaise)}</b></div>)}
       </>}
       {!receipt && <>
         {t.prepaidHours > 0 && <div className="slip-row"><span>Prepaid</span><b>{t.prepaidHours}h · {rupees(pays[0]?.amountPaise ?? 0)}</b></div>}
@@ -228,7 +229,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
   if (t) {
     const b = billFor(db, t, now)
     const cat = db.categories.find(c => c.id === t.category)
-    const stale = t.rev !== rev
+    const stale = t.rev !== rev && !(t.onlineCheckout && t.status === 'paid')
     const act = async (label: string, fn: () => Promise<void>) => {
       if (busy) return
       setBusy(true)
@@ -257,10 +258,12 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
           {b.duePaise > 0
             ? <div className="due-band"><span>To collect</span><b className="num">{rupees(b.duePaise)}</b></div>
             : <div className="due-band zero"><Ico n="check" size={22} /><span>Nothing due</span><b className="num">₹0</b></div>}
-          <p className="tiny muted">If the clock passes the next hour before you collect, the amount is checked again.</p>
+          <p className="tiny muted">{t.onlineCheckout ? 'The amount is locked for the online order. The customer can pay from their ticket QR.' : 'The amount is checked again before payment.'}</p>
         </div>}
         {stale && t.status !== 'cancelled' && <div className="banner banner-warn"><Ico n="warn" /><div>This ticket was changed on another device. <button className="link" onClick={() => setRev(t.rev)}>Reload</button></div></div>}
-        {t.status === 'inside' && !stale && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
+        {t.status === 'inside' && db.razorpayEnabled && b.duePaise >= 100 && (!stale || t.onlineCheckout) &&
+          <RazorpayCheckout key={t.id} ticketId={t.id} amount={b.duePaise} name={db.settings.operator} hasOrder={Boolean(t.onlineCheckout)} onPaid={setRev} />}
+        {t.status === 'inside' && !stale && !t.onlineCheckout && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
           {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> Nothing due · Continue</>}
         </button></div>}
         {t.status === 'paid' && <>
@@ -269,7 +272,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         </>}
         {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}. Receipt ready to print.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-ghost" onClick={() => { window.print(); void markPrinted(me.id, t.id).catch(error => toast(error.message, true)) }}><Ico n="print" /> Print receipt</button><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Save · Next vehicle</button></>}
         {t.status === 'cancelled' && <div className="banner banner-bad"><Ico n="x" /><div><b>Cancelled</b> by {t.cancelledBy} at {fmtTime(t.cancelledAt!)}{t.cancelReason ? `: ${t.cancelReason}` : ''}.</div></div>}
-        {(t.status === 'inside' || t.status === 'paid') && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
+        {(t.status === 'inside' || t.status === 'paid') && !t.onlineCheckout && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
         {cancelling && <div className="card">
           <label className="lbl" htmlFor="rsn">Reason {db.settings.cancelNeedsReason ? '(required)' : '(optional)'}</label>
           <input id="rsn" className="field small-field" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong vehicle type" />
@@ -351,7 +354,13 @@ export function Customer({ db, token }: { db: DB; token: string }) {
         </dl>
       </div>
       <div className="card">
-        {t.status === 'inside' && <><div className="muted small">Estimate if you leave now</div><div className="amount">{rupees(b.duePaise)}</div><p className="tiny muted">This is an estimate. The final amount is set at the exit gate. Pay the attendant in cash.</p></>}
+        {t.status === 'inside' && <>
+          <div className="muted small">{t.onlineCheckout ? 'Amount to pay' : 'Estimate if you leave now'}</div>
+          <div className="amount">{rupees(b.duePaise)}</div>
+          {db.razorpayEnabled && t.onlineCheckout
+            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={db.settings.operator} hasOrder />
+            : <p className="tiny muted">{db.razorpayEnabled ? 'Ask the exit attendant to enable online payment when you are ready to leave.' : 'Pay the attendant at the exit gate.'}</p>}
+        </>}
         {(t.status === 'paid' || t.status === 'exited') && <><div className="muted small">Paid</div><div className="amount ok">{rupees(t.totalPaise ?? 0)}</div></>}
         {t.status === 'cancelled' && <p>This ticket was cancelled.</p>}
       </div>
