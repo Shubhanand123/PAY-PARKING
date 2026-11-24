@@ -6,7 +6,9 @@ export function plateFromText(text: string, confidence: number): PlateReading | 
   const lines = text.toUpperCase().split(/\r?\n/).map(line => normPlate(line.replace(/^\s*IND(?:\s+|$)/, ''))).filter(Boolean)
   const joined = lines.slice(0, -1).map((line, i) => line + lines[i + 1])
   const possible = [...lines, ...joined]
-  const plate = possible.find(isSupportedPlateFormat)
+  // The plate's border often reads as a stray 1, I, J or L at either end. Drop it only if that makes a valid plate.
+  const trimmed = possible.flatMap(line => [line.replace(/^[1IJL]/, ''), line.replace(/[1IJL]$/, ''), line.replace(/^[1IJL]/, '').replace(/[1IJL]$/, '')])
+  const plate = possible.find(isSupportedPlateFormat) ?? trimmed.find(isSupportedPlateFormat)
   return plate ? { plate, confidence: confidence / 100 } : undefined
 }
 

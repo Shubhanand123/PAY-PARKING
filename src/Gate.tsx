@@ -2,6 +2,7 @@ import { RazorpayCheckout } from './RazorpayCheckout'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
+import { createWedgeReader } from './scanner-wedge'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -225,6 +226,28 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     setPick(near)
   }
   const reset = () => { setId(null); setQ(''); setScannedPlate(false); setPlateAlternatives([]); setPick(null); setCancelling(false); setReason('') }
+
+  // The POS's built-in barcode scanner types the ticket QR like a keyboard and presses Enter.
+  const wedge = useRef({ find, reset, toast, ticket: t })
+  useEffect(() => { wedge.current = { find, reset, toast, ticket: t } })
+  useEffect(() => {
+    const read = createWedgeReader(value => {
+      const { find, reset, toast, ticket } = wedge.current
+      if (ticket && ticket.status !== 'exited' && ticket.status !== 'cancelled') {
+        toast('Finish this ticket, then tap New lookup before scanning the next one.', true)
+        return
+      }
+      reset()
+      setScanningPlate(false)
+      find('auto', value)
+    })
+    const onKey = (event: KeyboardEvent) => {
+      if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return
+      if (read(event.key, event.timeStamp)) { event.preventDefault(); event.stopPropagation() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   if (t) {
     const b = billFor(db, t, now)
