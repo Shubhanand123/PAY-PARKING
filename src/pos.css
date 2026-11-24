@@ -246,3 +246,82 @@
 .brand-logo { display: inline-flex; align-items: center; height: 34px; padding: 4px 8px; border-radius: 9px; background: #fff; margin-right: 10px; }
 .brand-logo img { height: 26px; width: auto; display: block; }
 .brand { display: inline-flex; align-items: center; letter-spacing: .1em; font-weight: 800; }
+
+/* Activity log */
+.arow { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--color-border); }
+.arow:last-child { border-bottom: 0; }
+.a-ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--color-bg-subtle); color: var(--color-text-secondary); }
+.tone-ok .a-ico { background: var(--color-success-bg); color: var(--color-success-text); }
+.tone-bad .a-ico { background: var(--color-danger-bg); color: var(--color-danger-text); }
+.tone-warn .a-ico { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.tone-info .a-ico { background: var(--color-accent-subtle); color: var(--color-accent-text); }
+.a-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.a-x { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.a-meta { font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.a-meta b { color: var(--color-text); font-weight: 700; }
+.a-t { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+.live-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgb(34 197 94 / 60%); animation: live-pulse 1.8s ease-out infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes live-pulse { to { box-shadow: 0 0 0 8px rgb(34 197 94 / 0%); } }
+.log-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.log-date { position: sticky; top: 0; background: var(--color-bg-surface); padding: 8px 0 4px; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; z-index: 1; }
+.live-activity .arow { padding: 7px 0; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* ===================== v2.6 polish: tap targets, feedback, motion, fit ===================== */
+/* Log rows: icon · text · time on one line at every width */
+.owner .arow, .live-activity .arow, .log-feed .arow { display: grid !important; grid-template-columns: 34px minmax(0, 1fr) auto !important; gap: 10px; align-items: start; }
+.owner .arow .a-t { grid-column: auto !important; padding-top: 2px; }
+.log-title { margin: 0; display: flex; align-items: center; }
+.log-sub { margin: 4px 0 0; }
+
+/* Phone dashboard: one sticky, swipeable row of sections instead of a 3-row grid */
+@media (max-width: 719px) {
+  .owner .tabs { display: flex !important; overflow-x: auto; scroll-snap-type: x proximity; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 15; margin-inline: -4px; }
+  .owner .tab { flex: none; flex-direction: row !important; gap: 6px; font-size: .85rem !important; min-height: 44px !important; padding: 0 14px !important; scroll-snap-align: start; }
+}
+.owner .tab.on { background: var(--color-accent-subtle); color: var(--color-accent-text); box-shadow: inset 0 0 0 1.5px var(--color-accent-subtle-border); }
+
+/* Everything tappable: at least 44 px, clear pressed state, smooth feedback */
+.btn, .chip, .tab, .listrow, .cat, .gh-tab, .icon-btn, .pay-btn, .link, .sw-btn, select.field, .toggle {
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.btn, .chip, .listrow, .icon-btn, .gh-tab, .tab, .cat { transition: transform 120ms var(--ease), box-shadow 160ms var(--ease), background-color 160ms var(--ease), color 160ms var(--ease), opacity 160ms; }
+.btn:not(:disabled):active, .chip:active, .listrow:active, .icon-btn:active, .gh-tab:active, .tab:active, .pay-btn:not(:disabled):active { transform: scale(.97); }
+.cat:active { transform: scale(.95); }
+.chip { min-height: 40px; padding-inline: 14px; }
+.link { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; }
+.q9-foot .link, .a-meta .link { min-height: 0; }
+.listrow { min-height: 56px; }
+.btn:disabled { opacity: .55; }
+:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; border-radius: 10px; }
+@media (hover: hover) {
+  .card.table-card tr:hover td, .listrow:hover { background: var(--color-bg-subtle); }
+  .btn:not(:disabled):hover { filter: brightness(1.04); }
+  .cat:hover { border-color: var(--color-accent-subtle-border); }
+}
+.tbl tbody tr { cursor: pointer; }
+
+/* Motion: screens and cards rise in gently, lists cascade, selections pop */
+@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { 0% { transform: scale(.94); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+.content > .stack > *, .owner-panel > *, .owner-panel > .stack > *, .q9 > *, .pos-setup > * { animation: rise-in 260ms var(--ease) both; }
+.content > .stack > *:nth-child(2), .owner-panel > .stack > *:nth-child(2), .q9 > *:nth-child(2) { animation-delay: 40ms; }
+.content > .stack > *:nth-child(3), .owner-panel > .stack > *:nth-child(3), .q9 > *:nth-child(3) { animation-delay: 80ms; }
+.content > .stack > *:nth-child(n+4), .owner-panel > .stack > *:nth-child(n+4), .q9 > *:nth-child(n+4) { animation-delay: 120ms; }
+.kpis > * { animation: rise-in 300ms var(--ease) both; }
+.kpis > *:nth-child(2) { animation-delay: 30ms; } .kpis > *:nth-child(3) { animation-delay: 60ms; } .kpis > *:nth-child(4) { animation-delay: 90ms; }
+.kpis > *:nth-child(n+5) { animation-delay: 120ms; }
+.log-feed .arow, .live-activity .arow, .inside-list .listrow { animation: rise-in 240ms var(--ease) both; }
+.cat.on, .chip.on, .gh-tab.on { animation: pop-in 260ms var(--ease); }
+.actionbar { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .content > .stack > *, .owner-panel > *, .owner-panel > .stack > *, .q9 > *, .pos-setup > *, .kpis > *, .log-feed .arow, .live-activity .arow, .inside-list .listrow, .cat.on, .chip.on, .gh-tab.on { animation: none !important; }
+  .btn, .chip, .listrow, .icon-btn, .gh-tab, .tab, .cat { transition: none; }
+}
+
+/* Fit: nothing wider than the screen, long text wraps, tables scroll inside their card */
+.content, .owner-panel, .card { min-width: 0; }
+.table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.card h2 { text-wrap: balance; }
+.kpi-v { overflow-wrap: anywhere; }
+.log-filters input { grid-column: 1 / -1; }

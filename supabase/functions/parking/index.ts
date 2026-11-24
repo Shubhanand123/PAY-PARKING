@@ -506,7 +506,7 @@ Deno.serve(async request => {
       }
       return reply({ error: 'Try again.' }, 409)
     }
-    if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label ?? deviceLabel })
+    if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label ?? deviceLabel ?? (role === 'open' ? 'Website · Exit gate' : role === 'owner' ? 'Owner' : undefined) })
     if (action === 'issueOwnerCode') {
       if (role !== 'owner') return reply({ error: 'Only the owner can issue a recovery code.' }, 403)
       const [mobile] = args
@@ -632,9 +632,14 @@ Deno.serve(async request => {
         // Offline tickets that were already inside elsewhere: keep pointing them to the server ticket.
         for (const issue of db.offlineIssues ?? []) { const m = /\(([^)]+)\) but was already inside as (T-[A-Z0-9-]+)/.exec(issue.text); if (m) map[m[1]] = m[2] }
         const issues: NonNullable<parking.DB['offlineIssues']> = []
+        const who = deviceLabel ?? (typeof ops[0]?.device === 'string' ? 'POS ' + ops[0].device : 'Website gate')
         for (const op of [...ops].sort((a, b) => a.at - b.at)) {
           if (seen.has(op.opId)) continue
+          const audits = db.audit.length, pays = db.payments.length
           const problem = applyOp(db, op, map)
+          for (const a of db.audit.slice(audits)) a.by = who + ' (offline)'
+          for (const p of db.payments.slice(pays)) p.by = who
+          for (const t of db.tickets) if (t.id === op.ticketId && op.kind === 'entry' && t.entryAt === op.at) t.entryBy = who
           seen.add(op.opId)
           if (problem) issues.push({ at: op.at, opId: op.opId, ticketId: op.ticketId, device: deviceLabel ?? op.device, text: problem })
         }
@@ -680,7 +685,8 @@ Deno.serve(async request => {
       const staffId = role === 'owner' || (role === 'open' && command.roles.length === 1 && command.roles[0] === 'owner') ? 'owner'
         : role === 'exit' || ((role === 'both' || role === 'open') && atExit) ? 'sunil' : 'ravi'
       const result = parking.runAction(db, staffId, (snapshot, staff) => {
-        const label = signedIn?.app_metadata?.parking_label ?? deviceLabel
+        // Who did it, as the Owner sees it in the Activity log: the POS's dashboard name, the Owner, or the open website.
+        const label = signedIn?.app_metadata?.parking_label ?? deviceLabel ?? (role === 'open' ? (staff.id === 'owner' ? 'Owner' : staff.id === 'sunil' ? 'Website · Exit gate' : 'Website · Entry gate') : role === 'owner' ? 'Owner' : undefined)
         return commandFn(snapshot, label ? { ...staff, name: label } : staff, ...args)
       })
       const saved = await saveState(db, version)

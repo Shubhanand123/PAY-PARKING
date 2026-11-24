@@ -1,7 +1,7 @@
 import { indianMobile } from './parking-auth'
 import { apiEnabled, callParking, openAccess } from './parking-api'
 import { publishTariff, saveSettings } from './actions'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
   activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
@@ -15,7 +15,7 @@ type Tab = 'overview' | 'tickets' | 'customers' | 'free' | 'audit' | 'rates' | '
 
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
-  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['free', 'Free vehicles', 'check'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
+  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['free', 'Free vehicles', 'check'], ['audit', 'Activity log', 'list'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
   if (apiEnabled) tabs.push(['devices', 'POS devices', 'key'])
   return (
     <div className="owner">
@@ -23,7 +23,7 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
         {tabs.map(([k, l, i]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)} aria-current={tab === k}><Ico n={i} size={18} />{l}</button>)}
       </nav>
       <div className="owner-panel">
-      {tab === 'overview' && <><OfflineChecks db={db} /><Overview db={db} /></>}
+      {tab === 'overview' && <><OfflineChecks db={db} /><Overview db={db} live={<LiveActivity db={db} onAll={() => setTab('audit')} />} /></>}
       {tab === 'tickets' && <Tickets db={db} me={me} toast={toast} />}
       {tab === 'customers' && <Customers db={db} me={me} toast={toast} />}
       {tab === 'free' && <FreeVehicles db={db} me={me} toast={toast} />}
@@ -37,7 +37,7 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 }
 
 // ---------- overview ----------
-function Overview({ db }: { db: DB }) {
+function Overview({ db, live }: { db: DB; live?: ReactNode }) {
   const now = useNow(30000)
   const today = istDay(now)
   const s = useMemo(() => {
@@ -67,7 +67,6 @@ function Overview({ db }: { db: DB }) {
 
   return (
     <div className="stack">
-      <FlowStrip />
       <div className="kpis">
         <Kpi icon="p" label="Inside now" value={String(s.inside.length)} sub={cap ? `of ${cap} spaces` : ''} tone="info" />
         <Kpi icon="cash" label="Collections today" value={rupees(s.cash + s.online)} sub={`${rupees(s.cash)} cash · ${rupees(s.online)} online`} tone="ok" />
@@ -78,6 +77,7 @@ function Overview({ db }: { db: DB }) {
         <Kpi icon="print" label="Reprints today" value={String(s.reprints + s.receiptReprints)} sub={`${s.reprints} slips · ${s.receiptReprints} receipts`} tone={s.reprints + s.receiptReprints > 5 ? 'warn' : undefined} />
         <Kpi icon="check" label="Free exits today" value={String(s.freeToday.length)} sub={`${rupees(s.waivedToday)} waived`} />
       </div>
+      {live}
       <div className="grid2">
         {cap > 0 && <div className="card">
           <h2>Occupancy</h2>
@@ -106,16 +106,6 @@ function Overview({ db }: { db: DB }) {
           {s.cancels > 3 && <div className="listrow static"><Ico n="warn" /><b>{s.cancels} cancels today</b><span>Check the master audit</span></div>}
         </div>
       </div>
-    </div>
-  )
-}
-
-function FlowStrip() {
-  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved and printed by itself'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash, online or free · receipt prints'], ['out', 'Leave', 'Hand over receipt, close ticket']]
-  return (
-    <div className="flow" aria-label="How a vehicle moves through the system">
-      <svg className="flow-road" viewBox="0 0 600 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10H600" strokeDasharray="10 10" /></svg>
-      {steps.map(([i, t, d], k) => <div key={k} className="flow-step"><span className="flow-ico"><Ico n={i} size={22} /></span><b>{t}</b><small>{d}</small></div>)}
     </div>
   )
 }
@@ -248,36 +238,77 @@ const KIND: Record<AuditKind, [string, 'ok' | 'warn' | 'bad' | 'info' | 'mute']>
   settings: ['Settings', 'warn'], duplicate_blocked: ['Duplicate blocked', 'warn'], login: ['Login', 'mute'],
   receipt_print: ['Receipt', 'mute'], receipt_reprint: ['Receipt reprint', 'warn'], free_vehicle: ['Free list', 'warn'],
 }
-function AuditRow({ a }: { a: DB['audit'][number] }) {
+const ago = (t: number, now: number) => { const m = Math.round((now - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 24 * 60 ? `${Math.floor(m / 60)} h ago` : fmtDT(t) }
+const KIND_ICON: Partial<Record<AuditKind, string>> = { entry: 'car', exit: 'out', payment: 'cash', cancel: 'x', print: 'print', reprint: 'print', receipt_print: 'print', receipt_reprint: 'print', tariff: 'rupee', settings: 'gear', free_vehicle: 'check', lookup_plate: 'search', lookup_qr: 'qr', duplicate_blocked: 'warn', plate_fix: 'scan', login: 'key' }
+function AuditRow({ a, now }: { a: DB['audit'][number]; now?: number }) {
   const [l, tone] = KIND[a.kind]
-  return <div className="arow"><span className="a-t num">{fmtDT(a.at)}</span><Pill tone={tone}>{l}</Pill><span className="a-x">{a.text}</span><span className="a-by muted">{a.by}{a.ticketId ? ` · ${a.ticketId}` : ''}</span></div>
+  return <div className={'arow tone-' + tone}>
+    <span className="a-ico"><Ico n={KIND_ICON[a.kind] ?? 'list'} size={18} /></span>
+    <div className="a-main"><div className="a-x"><Pill tone={tone}>{l}</Pill> {a.text}</div>
+      <div className="a-meta"><b>{a.by}</b>{a.ticketId ? ` · ${a.ticketId}` : ''}{a.amountPaise ? ` · ${rupees(a.amountPaise)}` : ''}</div></div>
+    <span className="a-t num" title={fmtDT(a.at)}>{now ? ago(a.at, now) : fmtTime(a.at)}</span>
+  </div>
 }
+
+/** Overview card: the latest things that happened, live. */
+function LiveActivity({ db, onAll }: { db: DB; onAll: () => void }) {
+  const now = useNow(15000)
+  const latest = db.audit.slice(-8).reverse()
+  return <div className="card live-activity">
+    <div className="bill-head"><h2><span className="live-dot" /> Live activity</h2><button className="link" onClick={onAll}>See all</button></div>
+    {latest.map(a => <AuditRow key={a.id} a={a} now={now} />)}
+    {!latest.length && <p className="muted small">Nothing yet today. Entries, payments and exits appear here as they happen.</p>}
+  </div>
+}
+
+type What = 'all' | 'money' | 'gate' | 'risk'
+const WHAT: [What, string][] = [['all', 'Everything'], ['gate', 'Entries & exits'], ['money', 'Money'], ['risk', 'To check']]
+const RISK: AuditKind[] = ['cancel', 'reprint', 'receipt_reprint', 'free_vehicle', 'lookup_plate', 'tariff', 'settings', 'duplicate_blocked', 'plate_fix']
+
+/** Every action on every POS and in the dashboard: what happened, who did it, when. Nobody can edit or delete it. */
 function AuditLog({ db }: { db: DB }) {
-  const [kind, setKind] = useState<'all' | 'money' | 'risk' | AuditKind>('risk')
+  const now = useNow(15000)
+  const [what, setWhat] = useState<What>('all')
   const [who, setWho] = useState('all')
+  const [days, setDays] = useState(1)
   const [q, setQ] = useState('')
-  const risk: AuditKind[] = ['cancel', 'reprint', 'receipt_reprint', 'free_vehicle', 'lookup_plate', 'tariff', 'settings', 'duplicate_blocked', 'plate_fix']
-  const list = db.audit.filter(a => (kind === 'all' || (kind === 'money' ? ['payment', 'exit'].includes(a.kind) : kind === 'risk' ? risk.includes(a.kind) : a.kind === kind))
-    && (who === 'all' || a.by === who) && (!q || (a.text + a.ticketId).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
-  const today = istDay(Date.now())
-  const per = db.staff.map(s => ({ s, cash: db.payments.filter(p => p.method === 'cash' && p.by === s.name && istDay(p.at) === today).reduce((a, p) => a + p.amountPaise, 0), cancels: db.audit.filter(a => a.by === s.name && a.kind === 'cancel' && istDay(a.at) === today).length, reprints: db.audit.filter(a => a.by === s.name && a.kind === 'reprint' && istDay(a.at) === today).length }))
+  const today = istDay(now)
+  const since = days === 0 ? 0 : days === 1 ? new Date(today + 'T00:00:00+05:30').getTime() : now - days * 86400000
+  const people = useMemo(() => [...new Set(db.audit.map(a => a.by))].sort(), [db.audit])
+  const list = db.audit.filter(a => a.at >= since
+    && (what === 'all' || (what === 'money' ? ['payment', 'exit'].includes(a.kind) : what === 'gate' ? ['entry', 'exit', 'payment'].includes(a.kind) : RISK.includes(a.kind)))
+    && (who === 'all' || a.by === who) && (!q || (a.text + ' ' + (a.ticketId ?? '') + ' ' + a.by).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
+  const byPerson = people.map(name => {
+    const mine = db.audit.filter(a => a.by === name && a.at >= since)
+    const pays = db.payments.filter(p => p.by === name && p.at >= since)
+    return { name, entries: mine.filter(a => a.kind === 'entry').length, exits: mine.filter(a => a.kind === 'exit').length,
+      cash: pays.filter(p => p.method === 'cash').reduce((a, p) => a + p.amountPaise, 0), upi: pays.filter(p => p.method === 'razorpay').reduce((a, p) => a + p.amountPaise, 0),
+      flags: mine.filter(a => RISK.includes(a.kind)).length, last: mine.length ? mine[mine.length - 1].at : 0 }
+  }).filter(p => p.last).sort((a, b) => b.last - a.last)
+  const groups: [string, typeof list][] = []
+  for (const a of list.slice(0, 400)) { const d = istDay(a.at); const g = groups[groups.length - 1]; if (g && g[0] === d) g[1].push(a); else groups.push([d, [a]]) }
   return (
     <div className="stack">
-      <div className="card">
-        <h2>Today by staff member</h2>
-        <p className="muted small">Every action on every POS is recorded here. Nobody can edit or delete these records.</p>
-        <table className="tbl"><thead><tr><th>Staff</th><th className="r">Cash taken</th><th className="r">Cancels</th><th className="r">Reprints</th></tr></thead>
-          <tbody>{per.map(p => <tr key={p.s.id}><td>{p.s.name}</td><td className="r num">{rupees(p.cash)}</td><td className="r num">{p.cancels}</td><td className="r num">{p.reprints}</td></tr>)}</tbody></table>
+      <div className="card stack">
+        <h2 className="log-title"><span className="live-dot" /> Activity log</h2>
+        <p className="muted tiny log-sub">Every action on every POS and in this dashboard: what happened, who did it, when. Updates by itself. Nobody can edit or delete it.</p>
+        <div className="chips">{WHAT.map(([k, l]) => <button key={k} className={'chip' + (what === k ? ' on' : '')} aria-pressed={what === k} onClick={() => setWhat(k)}>{l}</button>)}</div>
+        <div className="log-filters">
+          <select className="field small-field" value={who} onChange={e => setWho(e.target.value)} aria-label="Who"><option value="all">Everyone</option>{people.map(p => <option key={p} value={p}>{p}</option>)}</select>
+          <select className="field small-field" value={days} onChange={e => setDays(Number(e.target.value))} aria-label="When"><option value={1}>Today</option><option value={2}>Last 2 days</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={0}>All time</option></select>
+          <input className="field small-field" placeholder="Search plate, ticket, text" value={q} onChange={e => setQ(e.target.value)} aria-label="Search" />
+        </div>
       </div>
-      <div className="card toolbar">
-        <select className="field small-field" value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
-          <option value="risk">Things to check (cancels, reprints, lookups, rate changes)</option><option value="money">Money (payments, exits)</option><option value="all">Everything</option>
-          {Object.entries(KIND).map(([k, [l]]) => <option key={k} value={k}>Only: {l}</option>)}
-        </select>
-        <select className="field small-field" value={who} onChange={e => setWho(e.target.value)}><option value="all">All staff</option>{db.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select>
-        <input className="field small-field" placeholder="Search text or ticket" value={q} onChange={e => setQ(e.target.value)} />
+      {byPerson.length > 0 && <div className="card table-card">
+        <h2>Who did what <span className="muted small">({days === 1 ? 'today' : days === 0 ? 'all time' : `last ${days} days`})</span></h2>
+        <table className="tbl"><thead><tr><th>Who</th><th className="r">Entries</th><th className="r">Exits</th><th className="r">Cash</th><th className="r">UPI</th><th className="r">To check</th><th>Last</th></tr></thead>
+          <tbody>{byPerson.map(p => <tr key={p.name} onClick={() => setWho(p.name)} className={who === p.name ? 'sel' : ''}><td><b>{p.name}</b></td><td className="r num">{p.entries}</td><td className="r num">{p.exits}</td><td className="r num">{rupees(p.cash)}</td><td className="r num">{rupees(p.upi)}</td><td className="r num">{p.flags ? <Pill tone="warn">{p.flags}</Pill> : 0}</td><td className="muted small">{ago(p.last, now)}</td></tr>)}</tbody></table>
+      </div>}
+      <div className="card log-feed">
+        {groups.map(([d, items]) => <div key={d} className="log-day"><div className="log-date">{d === today ? 'Today' : fmtDT(items[0].at).split(',')[0]} <span className="muted">· {items.length}</span></div>{items.map(a => <AuditRow key={a.id} a={a} now={now} />)}</div>)}
+        {!list.length && <Empty text="Nothing matches. Try Everything or a longer time." />}
+        {list.length > 400 && <p className="tiny muted center">Showing the latest 400. Narrow it down with the filters.</p>}
       </div>
-      <div className="card">{list.slice(0, 300).map(a => <AuditRow key={a.id} a={a} />)}{!list.length && <Empty text="No matching records." />}</div>
     </div>
   )
 }
