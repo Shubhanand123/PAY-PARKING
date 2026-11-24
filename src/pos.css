@@ -401,3 +401,9 @@ body.has-update .gh-time { display: none; }
 #upd-slot { display: contents; }
 #upd-slot .upd-pill { position: static; transform: none; top: auto; left: auto; flex: none; max-width: 45vw; animation: rise-in 240ms var(--ease) both; }
 .hero-row #upd-slot .upd-pill { margin-left: auto; margin-right: 8px; }
+
+/* Update button stands out from "Online": solid white, blue text, arrow, soft glow */
+#upd-slot .upd-pill, .upd-pill { background: #fff !important; color: #16245c !important; border: 0 !important; font-weight: 800; font-size: 12px; padding: 5px 11px 5px 9px; gap: 5px; backdrop-filter: none; animation: rise-in 240ms var(--ease) both, upd-glow 2.2s ease-in-out 240ms infinite; }
+.upd-ico { color: #2e5dcf; flex: none; }
+@keyframes upd-glow { 0%, 100% { box-shadow: 0 0 0 0 rgb(255 255 255 / 55%); } 50% { box-shadow: 0 0 0 6px rgb(255 255 255 / 0%); } }
+@media (prefers-reduced-motion: reduce) { .upd-pill { animation: none !important; } }
