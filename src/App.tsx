@@ -11,15 +11,20 @@ type View = 'entry' | 'exit' | 'owner'
 const route = () => location.hash.replace(/^#\/?/, '')
 let pairing: { code: string; request: Promise<void> } | undefined
 
-function openPairedPos(code: string) {
-  if (pairing?.code === code) return pairing.request
-  const request = callParking<{ key: string }>('pairPosDevice', [code], '').then(async ({ result }) => {
+function openDirectPos(link: string) {
+  if (pairing?.code === link) return pairing.request
+  const [kind, code] = link.split('/')
+  const request = (kind === 'pair-pos'
+    ? callParking<{ key: string }>('pairPosDevice', [code], '').then(({ result }) => result.key)
+    : callParking('posSnapshot', [], code).then(() => code)).then(async key => {
     await auth?.auth.signOut({ scope: 'local' })
-    setDeviceKey(result.key)
+    setDeviceKey(key)
   })
-  pairing = { code, request }
+  pairing = { code: link, request }
   return request
 }
+
+const isPosLink = (value: string) => /^(?:pos|pair-pos)\//.test(value)
 
 export default function App() {
   return apiEnabled ? <ConnectedApp /> : <LocalApp />
@@ -56,8 +61,8 @@ function ConnectedApp() {
     let active = true
     setError('')
     setCustomer(undefined)
-    if (r.startsWith('pair-pos/')) {
-      void openPairedPos(r.slice('pair-pos/'.length)).then(() => {
+    if (isPosLink(r)) {
+      void openDirectPos(r).then(() => {
         if (active) { setSnapshot(undefined); location.replace('#/entry') }
       }).catch((failure: Error) => { if (active) setError(failure.message) })
       return () => { active = false }
@@ -74,9 +79,9 @@ function ConnectedApp() {
       } catch (failure) {
         if (!active) return
         if (!r.startsWith('t/') && failure instanceof ParkingApiError && (failure.status === 401 || failure.status === 403)) {
-          setDeviceKey('')
           setSnapshot(undefined)
           if (sessionId) await auth?.auth.signOut({ scope: 'local' })
+          else setDeviceKey('')
         }
         setError((failure as Error).message)
       }
@@ -90,35 +95,43 @@ function ConnectedApp() {
     const response = await callParking('snapshot', [], key)
     if (response.snapshot?.role !== 'owner') {
       setSnapshot(undefined)
-      throw new Error('Use your gate mobile number and password to sign in.')
+      throw new Error('Enter an Owner setup code.')
     }
     setDeviceKey(key)
     setSnapshot(response.snapshot)
   }
 
   async function signOut() {
-    setDeviceKey('')
+    if (!sessionId) setDeviceKey('')
     setSnapshot(undefined)
     setError('')
     await auth?.auth.signOut({ scope: 'local' })
-    location.hash = ''
+    location.hash = snapshot?.role === 'owner' ? '/owner' : ''
   }
 
   if (r.startsWith('t/')) {
     return customer ? <ParkingApp db={customer} /> : <main className="content"><p role="status">{error || 'Loading ticket…'}</p></main>
   }
-  if (r.startsWith('pair-pos/')) {
+  if (isPosLink(r)) {
     return <main className="content"><p role={error ? 'alert' : 'status'}>{error || 'Opening POS…'}</p>{error && <a className="link" href="#/entry">Open parking app</a>}</main>
   }
-  if (snapshot && (sessionId || deviceKey())) {
+  if (snapshot && (sessionId || deviceKey()) && (r !== 'owner' || snapshot.role === 'owner')) {
     return <><ParkingApp db={snapshot.db} role={snapshot.role} signOut={signOut} /><div className="content">
       {error && <p role="alert">{error} Reconnect before collecting cash.</p>}
     </div></>
   }
+  if (r === 'owner' && snapshot && snapshot.role !== 'owner') return <Login onOwnerSetup={activateOwner} error={error} />
   if (sessionId === undefined || ((sessionId || deviceKey()) && !error)) {
     return <main className="screen"><div className="content"><p role="status">Connecting to parking records…</p></div></main>
   }
-  return <Login onOwnerSetup={activateOwner} error={error} />
+  if (r === 'owner') return <Login onOwnerSetup={activateOwner} error={error} />
+  return <div className="screen">
+    <header className="hero compact"><div className="hero-row"><span className="brand"><span className="brand-mark"><Ico n="p" /></span>Pay Parking</span></div><h1>Gate POS</h1></header>
+    <main className="content"><section className="card stack">
+      <p>{error || 'Open your direct POS link on this machine to start.'}</p>
+      <a className="link" href="#/owner">Owner dashboard</a>
+    </section></main>
+  </div>
 }
 
 function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; signOut?: () => void }) {
@@ -146,7 +159,7 @@ function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; si
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
-          {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">Local mode · this browser</span>}
+          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">Local mode · this browser</span>}
         </div>
         {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
           {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}

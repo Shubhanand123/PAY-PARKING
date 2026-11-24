@@ -406,7 +406,7 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
     setInviteLink('')
     try {
       const { result } = await callParking<{ code: string }>('issuePosDeviceLink', [deviceName.trim(), 'both'])
-      setInviteLink(location.href.split('#')[0] + '#/pair-pos/' + result.code)
+      setInviteLink(location.href.split('#')[0] + '#/pos/' + result.code)
       setDeviceName('')
       setRefresh(current => current + 1)
     } catch (failure) { toast((failure as Error).message, true) }
@@ -422,7 +422,7 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
       <button className="btn btn-primary" disabled={busy || !deviceName.trim()}>Create direct POS link</button>
     </form>
     {inviteLink && <div className="banner banner-info" role="status"><div className="stack">
-      <p>Open this one-time link on the POS machine within 30 minutes. The browser will remember access for entry and exit.</p>
+      <p>Open this private link to go straight to Entry and Exit. It works until you deactivate it here.</p>
       <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy POS link</button>
     </div></div>}
     {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>

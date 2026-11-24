@@ -13,6 +13,7 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
     RAZORPAY_KEY_SECRET: keySecret,
   }
   const gateKey = 'a'.repeat(64)
+  let deviceRole = 'exit'
   let handler: (request: Request) => Promise<Response>
   const db = seed(false)
   const ticket = runAction(db, 'ravi', createEntry, 'GA01VA1234', 'car', 0).ticket
@@ -71,7 +72,7 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
       if (url.pathname === '/v1/orders/order_Example/payments') return Response.json({ items: [provider] })
     }
     if (url.pathname === '/rest/v1/parking_devices') {
-      return Response.json([{ role: 'exit' }])
+      return Response.json([{ role: deviceRole }])
     }
     if (url.pathname === '/rest/v1/parking_runtime') {
       if (options?.method === 'PATCH') {
@@ -93,6 +94,13 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
 
   try {
     await import('../supabase/functions/parking/index.ts')
+    assert.equal((await invoke('', { action: 'posSnapshot', args: [] }, false)).status, 401)
+    const pos = await invoke('', { action: 'posSnapshot', args: [] })
+    assert.equal(pos.status, 200)
+    assert.equal((await pos.json()).snapshot.db.razorpayEnabled, true)
+    deviceRole = 'owner'
+    assert.equal((await invoke('', { action: 'posSnapshot', args: [] })).status, 403)
+    deviceRole = 'exit'
     const request = { ticket_id: ticket.id, amount, currency: 'INR', receipt: ticket.id }
     assert.equal((await invoke('/create-order', request, false)).status, 401)
     assert.equal((await invoke('/create-order', { ...request, amount: 99 })).status, 400)

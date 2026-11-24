@@ -505,12 +505,11 @@ Deno.serve(async request => {
         const [label, gate] = args
         if (typeof label !== 'string' || !label.trim() || label.length > 80 || !isGate(gate)) return reply({ error: 'Enter a device name and choose its gate access.' }, 400)
         const code = randomToken()
-        const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString()
         await database('parking_devices', {
           method: 'POST', headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({ key_hash: await hashCode(code), role: gate, label: label.trim(), enabled: false, pairing_expires_at: expiresAt }),
+          body: JSON.stringify({ key_hash: await hashCode(code), role: gate, label: label.trim(), enabled: true }),
         })
-        return reply({ result: { code, expiresAt } }, 201)
+        return reply({ result: { code } }, 201)
       }
       if (action === 'listDevices') {
         const rows = await database<Array<{ id: string; label: string; role: string; enabled: boolean; key_hash: string; pairing_expires_at: string | null }>>(
@@ -529,6 +528,10 @@ Deno.serve(async request => {
       )
       if (!changed.length) return reply({ error: 'This gate device is already inactive or unavailable.' }, 409)
       return reply({ result: true })
+    }
+    if (action === 'posSnapshot') {
+      if (!digest || !isGate(role)) return reply({ error: 'This link does not grant POS access.' }, 403)
+      return reply({ snapshot: publishState(await state(), role) })
     }
     if (action === 'snapshot') return reply({ snapshot: publishState(await state(), role) })
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
