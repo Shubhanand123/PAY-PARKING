@@ -217,3 +217,5 @@
 
 .gh-mark { width: auto; height: 32px; padding: 3px 7px; }
 .gh-mark img { height: 100%; width: auto; display: block; }
+.gh-mark { display: flex; align-items: center; overflow: hidden; }
+.gh-mark img { height: 24px !important; width: auto; max-width: 60px; }
