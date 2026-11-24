@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { readPlateFrame, warmPlateReader } from './plate-worker'
 import { prettyPlate } from './engine'
 import { plateFromText, rankPlateFrames, type PlateReading } from './plate-reading'
-import { cropGray, estimateSkew, findRowSplit, locatePlate, toGray, textBlock, type Box } from './plate-locate'
+import { cropGray, estimateSkew, findRowSplit, locatePlate, otsu, textBlock, toGray, type Box } from './plate-locate'
 import { Ico } from './ui'
 
 export type ScanResult = PlateReading & { alternatives: string[] }
@@ -78,7 +78,7 @@ function drawPlate(src: Source, box: Box, canvas: HTMLCanvasElement, work: HTMLC
   const plate = cropGray(gray, inner)
   const split = findRowSplit(plate)
   const rows = split === undefined ? [[0, plate.height]] : [[0, split], [split, plate.height]]
-  const margin = Math.round(plate.height * (split === undefined ? .15 : .1))
+  const margin = Math.round(plate.height * (split === undefined ? .3 : .2))
   const tallest = Math.max(...rows.map(([a, b]) => b - a))
   canvas.width = plate.width * rows.length + margin * (rows.length + 1)
   canvas.height = tallest + margin * 2
@@ -89,7 +89,20 @@ function drawPlate(src: Source, box: Box, canvas: HTMLCanvasElement, work: HTMLC
   out.fillStyle = `rgb(${shade} ${shade} ${shade})`
   out.fillRect(0, 0, canvas.width, canvas.height)
   rows.forEach(([a, b], i) => out.drawImage(work, inner.x, inner.y + a, plate.width, b - a, margin + i * (plate.width + margin), margin, plate.width, b - a))
+  if (!enhance) blackOnWhite(out, canvas.width, canvas.height)
   return 'line'
+}
+
+// Black text on white whatever the plate colours: white, yellow (commercial), green (EV), black (rental).
+function blackOnWhite(context: CanvasRenderingContext2D, width: number, height: number) {
+  const image = context.getImageData(0, 0, width, height)
+  const gray = toGray(image.data, width, height)
+  const { cut, darkInk } = otsu(gray)
+  for (let i = 0, p = 0; i < gray.data.length; i++, p += 4) {
+    const ink = darkInk ? gray.data[i] <= cut : gray.data[i] > cut
+    image.data[p] = image.data[p + 1] = image.data[p + 2] = ink ? 0 : 255
+  }
+  context.putImageData(image, 0, 0)
 }
 
 function backgroundShade(img: { data: Uint8Array }) {
@@ -247,10 +260,10 @@ export function PlateScanner({ onRead, onClose, onQr }: {
           const src: Source = { image: preview, width: preview.videoWidth, height: preview.videoHeight }
           const box = findPlate(src, small)
           setPlateBox(box && { x: box.x / src.width, y: box.y / src.height, width: box.width / src.width, height: box.height / src.height })
-          // Extra contrast helps faint strips but garbles small, sharp plate crops: on a plate box, use it only after a miss.
-          const enhance = box ? !previousRead : index % 2 === 1
+          // Plate crops alternate clean black-on-white and greyscale with extra contrast: each wins on different plates.
+          const enhance = index % 2 === 1
           let layout: Layout
-          if (box && index % 3 !== 2) layout = drawPlate(src, box, canvas, work, enhance)
+          if (box && index % 4 !== 3) layout = drawPlate(src, box, canvas, work, enhance)
           else {
             const fastPass = index === 0 || Boolean(previousRead && index % 3 !== 2)
             drawStrip(src, canvas, fastPass, enhance)
@@ -262,7 +275,7 @@ export function PlateScanner({ onRead, onClose, onQr }: {
           if (frozen.current) continue
           previousRead = plateFromText(data.text, data.confidence)
           frames.push(previousRead)
-          if (frames.length > 6) frames.shift()
+          if (frames.length > 8) frames.shift()
           const ranked = rankPlateFrames(frames)
           const result = ranked.best && { ...ranked.best, alternatives: ranked.alternatives }
           setDraft(result)

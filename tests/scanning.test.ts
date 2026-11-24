@@ -99,3 +99,14 @@ test('plateFromText drops a border stroke read as 1 or I', async () => {
   assert.equal(plateFromText('GA 03 K\n5678', 80)?.plate, 'GA03K5678')
   assert.equal(plateFromText('GA 07 AB 12345', 60), undefined)
 })
+
+test('plateFromText fixes letter/digit look-alikes by position', async () => {
+  const { plateFromText } = await import('../src/plate-reading.ts')
+  assert.equal(plateFromText('GAO2T 7319', 72)?.plate, 'GA02T7319')
+  assert.equal(plateFromText('GA 07 AB 12S4', 80)?.plate, 'GA07AB1254')
+})
+
+test('plateFromText drops a doubled zero read as O0', async () => {
+  const { plateFromText } = await import('../src/plate-reading.ts')
+  assert.equal(plateFromText('GAO02T 7319', 80)?.plate, 'GA02T7319')
+})

@@ -1,4 +1,4 @@
-import { isSupportedPlateFormat, normPlate } from './engine.ts'
+import { checkPlate, isSupportedPlateFormat, normPlate } from './engine.ts'
 
 export type PlateReading = { plate: string; confidence: number }
 
@@ -8,8 +8,13 @@ export function plateFromText(text: string, confidence: number): PlateReading | 
   const possible = [...lines, ...joined]
   // The plate's border often reads as a stray 1, I, J or L at either end. Drop it only if that makes a valid plate.
   const trimmed = possible.flatMap(line => [line.replace(/^[1IJL]/, ''), line.replace(/[1IJL]$/, ''), line.replace(/^[1IJL]/, '').replace(/[1IJL]$/, '')])
+  // A zero is sometimes read twice, as O0 or 0O. Try dropping the O.
+  trimmed.push(...possible.flatMap(line => [line.replace('O0', '0'), line.replace('0O', '0')]).filter(line => !possible.includes(line)))
   const plate = possible.find(isSupportedPlateFormat) ?? trimmed.find(isSupportedPlateFormat)
-  return plate ? { plate, confidence: confidence / 100 } : undefined
+  if (plate) return { plate, confidence: confidence / 100 }
+  // Letter/digit look-alikes by position, e.g. GAO2T7319 -> GA02T7319: the district and last four are digits.
+  const fixed = [...possible, ...trimmed].map(line => checkPlate(line).suggestion).find(line => line && isSupportedPlateFormat(line))
+  return fixed ? { plate: fixed, confidence: confidence / 100 * .95 } : undefined
 }
 
 export function rankPlateFrames(frames: readonly (PlateReading | undefined)[]) {
@@ -26,7 +31,7 @@ export function rankPlateFrames(frames: readonly (PlateReading | undefined)[]) {
   const lastTwo = frames.slice(-2)
   const fast = Boolean(best && !second && lastTwo.length === 2
     && lastTwo.every(frame => frame?.plate === best.plate && frame.confidence >= .86))
-  const stable = Boolean(best && isSupportedPlateFormat(best.plate) && (fast || (best.count >= 3 && best.count > (second?.count ?? 0) && best.confidence / best.count >= .75)))
+  const stable = Boolean(best && isSupportedPlateFormat(best.plate) && (fast || (best.count >= 3 && best.count > (second?.count ?? 0) * 2 && best.confidence / best.count >= .62)))
   return { stable, best: best && { plate: best.plate, confidence: best.confidence / best.count }, alternatives: ranked.slice(1, 4).map(item => item.plate) }
 }
 
