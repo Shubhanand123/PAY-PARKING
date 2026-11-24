@@ -29,6 +29,7 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
       <b className="slip-h">{r.operator}</b>
       <div>{r.siteName}</div>
       <div className="slip-s">{r.address} · {r.phone}</div>
+      {r.gstin && <div className="slip-s">GSTIN: {r.gstin}</div>}
       <hr />
       <div className="slip-big">{r.free ? 'RECEIPT · FREE' : 'RECEIPT'}</div>
       <div className="slip-row"><span>Receipt</span><b>{r.receiptNo}</b></div>
@@ -61,6 +62,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
       <b className="slip-h">{db.settings.operator}</b>
       <div>{db.settings.siteName}</div>
       <div className="slip-s">{db.settings.address} · {db.settings.phone}</div>
+      {db.settings.gstin && <div className="slip-s">GSTIN: {db.settings.gstin}</div>}
       <hr />
       <div className="slip-big">{receipt ? 'RECEIPT' : 'PARKING SLIP'}</div>
       <div className="slip-row"><span>Ticket</span><b>{t.id}</b></div>

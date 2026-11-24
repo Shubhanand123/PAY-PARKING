@@ -35,7 +35,9 @@ export default function App() {
 /** Gates need no sign-in. The Owner dashboard needs the Owner's mobile number and password. */
 function OpenApp() {
   // Opens at once from the records saved on this POS; the server copy replaces it within a second.
-  const [snapshot, setSnapshot] = useState<Snapshot | undefined>(() => { const s = currentSnapshot(); return s?.role === 'owner' ? undefined : s })
+  // The Android app is a gate POS only: it works once it has scanned its setup QR from the Owner dashboard.
+  const appLocked = () => nativeApp && !deviceKey()
+  const [snapshot, setSnapshot] = useState<Snapshot | undefined>(() => { const s = currentSnapshot(); return s?.role === 'owner' || appLocked() ? undefined : s })
   const [customer, setCustomer] = useState<DB>()
   const [sessionId, setSessionId] = useState<string | null | undefined>(auth ? undefined : null)
   const [error, setError] = useState('')
@@ -52,7 +54,7 @@ function OpenApp() {
     const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => setSessionId(session?.user.id ?? null))
     return () => subscription.unsubscribe()
   }, [])
-  const [setupNeeded, setSetupNeeded] = useState(false)
+  const [setupNeeded, setSetupNeeded] = useState(appLocked)
   useEffect(() => {
     let active = true
     if (isPosLink(r)) {
@@ -62,6 +64,7 @@ function OpenApp() {
       return () => { active = false }
     }
     const refresh = async () => {
+      if (!r.startsWith('t/') && appLocked()) { setSetupNeeded(true); return }
       try {
         if (r.startsWith('t/')) {
           const response = await callParking('customer', [r.slice(2)], '')
@@ -73,7 +76,7 @@ function OpenApp() {
         // An expired or replaced Owner session: drop it and fall back to the open gate view.
         if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await auth?.auth.signOut({ scope: 'local' })
         if (failure instanceof ParkingApiError && failure.status === 403 && /not set up/i.test(failure.message)) { setSetupNeeded(true); setSnapshot(undefined) }
-        if (failure instanceof ParkingApiError && failure.status === 401 && deviceKey()) { setDeviceKey(''); setSetupNeeded(true) } // POS removed in the dashboard
+        if (failure instanceof ParkingApiError && failure.status === 401 && deviceKey()) { setDeviceKey(''); setSetupNeeded(true); setSnapshot(undefined) } // POS removed in the dashboard
         setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
       }
     }
@@ -252,9 +255,6 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
           <div className="brand"><span className="brand-logo"><img src="skc.png" alt="SKC" /></span>PARKAR</div>
           {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
-        {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
-          {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
-        </nav>}
         <h1>Owner dashboard</h1>
         <p>{db.settings.operator} · {db.settings.siteName}</p>
       </header>}
@@ -314,7 +314,7 @@ function PosSetup({ error }: { error: string }) {
     <header className="gh gh-entry"><div className="gh-row"><span className="gh-mark"><img src="skc.png" alt="SKC" /></span><b className="gh-name">PARKAR</b></div></header>
     <main className="content"><section className="card stack pos-setup">
       <h2>Set up this POS</h2>
-      <p className="muted small">The gates are locked to approved POS machines. On your phone, open the Owner dashboard → <b>POS devices</b>, add this POS, then scan its setup QR here.</p>
+      <p className="muted small">{nativeApp ? 'This app works only on a POS added by the Owner.' : 'The gates are locked to approved POS machines.'} On your phone, open the Owner dashboard → <b>POS devices</b>, add this POS, then scan its setup QR here. After that it opens straight to Entry and Exit, with no code or PIN, until the Owner removes it.</p>
       <button className="btn btn-primary btn-xl" onClick={() => setScan(true)}><Ico n="qr" size={24} /> Scan setup QR</button>
       {scan && <PlateScanner onClose={() => setScan(false)} onRead={() => setMsg('That was a number plate. Point the camera at the setup QR.')} onQr={value => { const ok = use(value); if (ok) setScan(false); return ok }} />}
       <label className="lbl" htmlFor="pos-link">Or paste the setup link</label>

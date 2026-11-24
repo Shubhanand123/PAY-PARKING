@@ -79,11 +79,11 @@ function Overview({ db }: { db: DB }) {
         <Kpi icon="check" label="Free exits today" value={String(s.freeToday.length)} sub={`${rupees(s.waivedToday)} waived`} />
       </div>
       <div className="grid2">
-        <div className="card">
+        {cap > 0 && <div className="card">
           <h2>Occupancy</h2>
           <Gauge v={occ} label={`${Math.round(occ * 100)}%`} sub={`${s.inside.length} of ${cap}`} />
           <div className="legend">{s.byCat.filter(c => c.n).map(c => <span key={c.name}><Ico n={c.icon} size={16} /> {c.name} <b>{c.n}</b></span>)}</div>
-        </div>
+        </div>}
         <div className="card">
           <h2>Collections, last 7 days</h2>
           <Bars data={s.daily.map(d => ({ label: new Date(d.d + 'T12:00:00+05:30').toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' }), v: d.v / 100, tip: `${rupees(d.v)} · ${d.n} vehicles` }))} fmt={v => '₹' + Math.round(v).toLocaleString('en-IN')} />
@@ -341,6 +341,7 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
   const [s, setS] = useState<Settings>(db.settings)
   const [saving, setSaving] = useState(false)
   const changed = Object.keys(s).some(k => s[k as keyof Settings] !== db.settings[k as keyof Settings])
+  const gstOk = !s.gstin || /^[0-9]{2}[A-Z0-9]{13}$/.test(s.gstin)
   const f = (k: keyof Settings, label: string, type = 'text') => <label className="setf"><span className="lbl">{label}</span><input className="field small-field" type={type} value={String(s[k])} onChange={e => setS({ ...s, [k]: type === 'number' ? Number(e.target.value) : e.target.value })} /></label>
   const tg = (k: 'payAtEntry' | 'cancelNeedsReason', label: string, help: string) => <label className="toggle"><input type="checkbox" checked={s[k]} onChange={e => setS({ ...s, [k]: e.target.checked })} /><span className="tg-ui" /><span><b>{label}</b><br /><span className="muted small">{help}</span></span></label>
   return (
@@ -351,13 +352,21 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         {tg('cancelNeedsReason', 'Require a reason to cancel a ticket', 'Off: attendants can cancel without typing anything. Every cancel is still in the master audit.')}
       </div>
       <div className="card grid2">
-        {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}{f('capacity', 'Total spaces', 'number')}
+        {f('operator', 'Company name')}{f('siteName', 'Site name')}{f('address', 'Address')}{f('phone', 'Phone')}
+        <label className="setf"><span className="lbl">GST number (GSTIN)</span>
+          <input className="field small-field" value={s.gstin ?? ''} maxLength={15} autoCapitalize="characters" placeholder="e.g. 30ABCDE1234F1Z5" onChange={e => setS({ ...s, gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') })} />
+          <span className="tiny muted">{!s.gstin ? 'Optional. Printed on every slip and receipt.' : gstOk ? 'Printed on every slip and receipt.' : 'A GSTIN has 15 characters, e.g. 30ABCDE1234F1Z5.'}</span>
+        </label>
       </div>
-      <button className="btn btn-primary" disabled={!changed || saving} onClick={async () => {
+      <div className="card stack">
+        <label className="toggle"><input type="checkbox" checked={s.capacity > 0} onChange={e => setS({ ...s, capacity: e.target.checked ? (db.settings.capacity || 100) : 0 })} /><span className="tg-ui" /><span><b>Track number of parking spaces</b><br /><span className="muted small">Off: the dashboard shows only how many vehicles are inside, with no total or % full.</span></span></label>
+        {s.capacity > 0 && f('capacity', 'Total spaces', 'number')}
+      </div>
+      <button className="btn btn-primary" disabled={!changed || saving || !gstOk} onClick={async () => {
         setSaving(true)
         saveStart()
         try {
-          await saveSettings(me.id, s)
+          await saveSettings(me.id, { ...s, gstin: s.gstin ? s.gstin : undefined })
           saveEnd(true, 'Saved')
           toast('Parking settings saved')
         } catch (error) {

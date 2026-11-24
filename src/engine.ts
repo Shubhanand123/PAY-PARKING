@@ -22,7 +22,8 @@ export type Settings = {
   siteName: string; operator: string; address: string; phone: string
   payAtEntry: boolean
   cancelNeedsReason: boolean
-  capacity: number
+  capacity: number       // total spaces; 0 = not tracked
+  gstin?: string         // GST number, printed on slips and receipts
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
 export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
@@ -60,7 +61,7 @@ export type FreeExit = { reason: string; waivedPaise: number }
  *  Owner dashboard show exactly what the customer was given, even if settings change later. */
 export type Receipt = {
   receiptNo: string; issuedAt: number; issuedBy: string
-  operator: string; siteName: string; address: string; phone: string
+  operator: string; siteName: string; address: string; phone: string; gstin?: string
   ticketId: string; plate: string; vehicle: string; entryAt: number; entryGate: string
   billedAt: number; minutes: number; lines: Line[]; totalPaise: number
   payments: { method: Payment['method']; kind: Payment['kind']; amountPaise: number; receiptNo: string }[]
@@ -308,7 +309,7 @@ export function makeReceipt(db: DB, t: Ticket, by: string): Receipt {
   const last = pays[pays.length - 1]
   return {
     receiptNo: last?.receiptNo ?? 'R-' + t.id.slice(2), issuedAt: Date.now(), issuedBy: by,
-    operator: db.settings.operator, siteName: db.settings.siteName, address: db.settings.address, phone: db.settings.phone,
+    operator: db.settings.operator, siteName: db.settings.siteName, address: db.settings.address, phone: db.settings.phone, ...(db.settings.gstin ? { gstin: db.settings.gstin } : {}),
     ticketId: t.id, plate: t.plate, vehicle: db.categories.find(c => c.id === t.category)?.name ?? t.category, entryAt: t.entryAt, entryGate: t.entryGate,
     billedAt: t.billedAt ?? Date.now(), minutes: b.minutes, lines: b.lines, totalPaise: t.totalPaise ?? b.totalPaise,
     payments: pays.map(p => ({ method: p.method, kind: p.kind, amountPaise: p.amountPaise, receiptNo: p.receiptNo })),

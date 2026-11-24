@@ -179,10 +179,11 @@ function valid(kind: string, value: unknown, db: parking.DB): boolean {
         && ['firstPaise', 'perHourPaise', 'capPaise'].every(k => isInteger(rate[k]))
     })
     case 'settings':
-      return isObject(value) && Object.keys(value).length === 7
+      return isObject(value) && (Object.keys(value).length === 7 || (Object.keys(value).length === 8 && 'gstin' in value))
         && ['siteName', 'operator', 'address', 'phone'].every(k => isText(value[k]))
         && Boolean(String(value.siteName).trim() && String(value.operator).trim())
-        && isInteger(value.capacity) && Number(value.capacity) > 0
+        && isInteger(value.capacity) // 0 = number of spaces not tracked
+        && (value.gstin === undefined || (typeof value.gstin === 'string' && /^([0-9]{2}[A-Z0-9]{13})?$/.test(value.gstin)))
         && typeof value.payAtEntry === 'boolean' && typeof value.cancelNeedsReason === 'boolean'
     default: return false
   }
