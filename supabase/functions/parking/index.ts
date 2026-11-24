@@ -255,13 +255,14 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       if (!providerOrder) {
         const receiptId = fresh.id + '-' + crypto.randomUUID().slice(0, 8)
         const quote = { amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } as const
-        if (payload.upi_qr === true) {
-          const qr = await createRazorpayQr(razorpay, amount, fresh.id)
+        // UPI QR needs Razorpay's QR Codes feature on the account; without it, fall back to a payment link shown as a QR.
+        const qr = payload.upi_qr === true ? await createRazorpayQr(razorpay, amount, fresh.id).catch(() => undefined) : undefined
+        if (qr) {
           if (!razorpayQrId.test(qr.id) || qr.payment_amount !== amount || qr.status !== 'active' || !(qr.image_content || qr.image_url)) {
             throw new RazorpayServiceError('Razorpay returned an unexpected QR code.')
           }
           providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: qr.id, upiQr: qr.image_content, qrImage: qr.image_url } }
-        } else if (payload.pos_qr === true) {
+        } else if (payload.pos_qr === true || payload.upi_qr === true) {
           const link = await createRazorpayLink(razorpay, amount, receiptId, fresh.id)
           if (!razorpayLinkId.test(link.id) || link.amount !== amount || link.currency !== currency || link.reference_id !== receiptId
             || link.status !== 'created' || !/^https:\/\/(?:rzp\.io|razorpay\.com)\//.test(link.short_url)) {

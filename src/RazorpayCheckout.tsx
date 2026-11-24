@@ -67,8 +67,10 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [failed, setFailed] = useState(false)
-  const [qr, setQr] = useState<{ text?: string; image?: string } | null>(upiQr || qrImage ? { text: upiQr, image: qrImage } : null)
-  useEffect(() => { if (upiQr || qrImage) setQr({ text: upiQr, image: qrImage }) }, [upiQr, qrImage])
+  // POS shows a big QR: Razorpay's UPI QR when available, otherwise the Razorpay payment link as a QR.
+  const fromProps = upiQr || qrImage ? { text: upiQr, image: qrImage } : pos && linkUrl ? { text: linkUrl, link: true } : null
+  const [qr, setQr] = useState<{ text?: string; image?: string; link?: boolean } | null>(fromProps)
+  useEffect(() => { if (fromProps) setQr(fromProps) }, [upiQr, qrImage, linkUrl]) // eslint-disable-line react-hooks/exhaustive-deps
   const [confirmCash, setConfirmCash] = useState(false)
   const ticket = pos ? { ticket_id: ticketId } : { ticket_token: token }
 
@@ -132,8 +134,8 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
     if (!begin()) return
     try {
       const order = await callParkingPayment<Order>('create-order', { ...ticket, amount, currency: 'INR', receipt: ticketId, upi_qr: true })
-      if (!order.upi_qr && !order.qr_image) throw new Error('Another online payment is open for this ticket. Check its status or switch to cash first.')
-      setQr({ text: order.upi_qr, image: order.qr_image })
+      if (!order.upi_qr && !order.qr_image && !order.link_url) throw new Error('Another online payment is open for this ticket. Check its status or switch to cash first.')
+      setQr(order.upi_qr || order.qr_image ? { text: order.upi_qr, image: order.qr_image } : { text: order.link_url, link: true })
     } catch (error) { showFailure(error) }
     finally { finish() }
   }
@@ -192,9 +194,10 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
       <div className="upi-qr-box">
         {qr.text ? <QR text={qr.text} size={340} /> : <img src={qr.image} alt="UPI payment QR code" />}
       </div>
-      <p className="upi-hint">Scan with any UPI app · GPay · PhonePe · Paytm</p>
+      <p className="upi-hint">{qr.link ? 'Scan with phone camera · pay on Razorpay' : 'Scan with any UPI app · GPay · PhonePe · Paytm'}</p>
       <p className="upi-wait" role="status"><span className="upi-dot" /> Waiting for payment… turns Paid by itself</p>
-      {test && <p className="tiny muted">Test mode: real UPI apps cannot pay a test QR. Use Card / other below to test, or switch to live keys.</p>}
+      {test && !qr.link && <p className="tiny muted">Test mode: real UPI apps cannot pay a test QR. Use Card / other below to test, or switch to live keys.</p>}
+      {test && qr.link && <p className="tiny muted">Test mode: on the Razorpay page use UPI success@razorpay or card 4111 1111 1111 1111.</p>}
     </div>
     <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>
     {confirmCash

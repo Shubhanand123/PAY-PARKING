@@ -32,9 +32,13 @@ async function request<T>(credentials: RazorpayCredentials, path: string, body?:
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(8_000),
     })
-    if (!response.ok) throw new RazorpayServiceError('Razorpay could not process the request. Please retry.')
+    if (!response.ok) {
+      const detail = await response.json().then(body => body?.error?.description, () => undefined)
+      throw new RazorpayServiceError(typeof detail === 'string' && detail ? 'Razorpay: ' + detail.slice(0, 160) : 'Razorpay could not process the request. Please retry.')
+    }
     return await response.json() as T
-  } catch {
+  } catch (error) {
+    if (error instanceof RazorpayServiceError) throw error
     throw new RazorpayServiceError('Razorpay could not process the request. Please retry.')
   }
 }
