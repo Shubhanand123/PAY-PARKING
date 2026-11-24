@@ -3,6 +3,7 @@
 // downloaded quietly, then switched to only at a safe moment: on a POS, when it is on the empty Entry/Exit home
 // screen, nothing is typed or open, and nobody has touched it for a while. On the dashboard the Owner taps to refresh.
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 const CHECK_EVERY = 60 * 60_000      // normal updates: once an hour (and when the app opens)
 const URGENT_EVERY = 3 * 60_000      // important updates: a tiny file is checked every 3 minutes
@@ -58,6 +59,8 @@ export function UpdateBar() {
   const [ready, setReady] = useState<{ urgent: boolean } | null>(null)
   const [switching, setSwitching] = useState(false)
   const [hint, setHint] = useState(false)
+  const [, redraw] = useState(0)
+  useEffect(() => { const f = () => setTimeout(() => redraw(n => n + 1), 50); addEventListener('hashchange', f); const i = setInterval(() => redraw(n => n + 1), 2000); return () => { removeEventListener('hashchange', f); clearInterval(i) } }, [])
 
   useEffect(() => {
     if (!import.meta.env.PROD || !currentScript()) return
@@ -95,6 +98,7 @@ export function UpdateBar() {
     return () => clearInterval(timer)
   }, [ready, dashboard])
 
+  useEffect(() => { document.body.classList.toggle('has-update', Boolean(ready)); return () => document.body.classList.remove('has-update') }, [ready])
   if (!ready) return null
   if (switching) return <div className="upd-strip" role="status"><span className="upd-spin" />Updating PARKER…</div>
   // A small button at the top: tap to update now (the POS only when nothing is open), otherwise it switches by itself.
@@ -102,7 +106,10 @@ export function UpdateBar() {
     if (!dashboard && !safeNow(true, true)) { setHint(true); setTimeout(() => setHint(false), 2500); return }
     setSwitching(true); setTimeout(() => location.reload(), 400)
   }
-  return <button className={'upd-pill' + (ready.urgent ? ' urgent' : '')} onClick={now} aria-label="Update available. Tap to update now.">
-    <span className="upd-dot" />{hint ? 'Finish this vehicle first' : ready.urgent ? 'Important update' : 'Update available'}
+  const pill = <button className="upd-pill" onClick={now} aria-label="Update available. Tap to update now.">
+    <span className="upd-dot" />{hint ? 'Finish this vehicle first' : 'Update available'}
   </button>
+  // Sits inside the header row (left of Online / Sign out), so it never covers anything.
+  const slot = document.getElementById('upd-slot')
+  return slot ? createPortal(pill, slot) : pill
 }

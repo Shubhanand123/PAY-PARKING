@@ -391,3 +391,13 @@
 .cat.on .cat-ico { background: transparent !important; color: var(--color-accent-text) !important; transform: scale(1.06); }
 .cats .cat.on .cat-ico svg { color: var(--color-accent-text) !important; }
 .cat-ico svg { width: 38px; height: 38px; }
+
+/* Update button: white text in the middle of the dark header, never over the Online badge */
+.upd-pill, .upd-pill.urgent { top: calc(env(safe-area-inset-top, 0px) + 13px); background: rgb(255 255 255 / 14%); color: #fff; border: 1px solid rgb(255 255 255 / 28%); box-shadow: none; backdrop-filter: blur(6px); font-size: 11.5px; padding: 3px 10px; min-height: 26px; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+.upd-pill .upd-dot, .upd-pill.urgent .upd-dot { background: #4ade80; }
+body.has-update .gh-time { display: none; }
+@media (max-width: 360px) { .upd-pill { font-size: 10.5px; padding: 3px 8px; } }
+
+#upd-slot { display: contents; }
+#upd-slot .upd-pill { position: static; transform: none; top: auto; left: auto; flex: none; max-width: 45vw; animation: rise-in 240ms var(--ease) both; }
+.hero-row #upd-slot .upd-pill { margin-left: auto; margin-right: 8px; }

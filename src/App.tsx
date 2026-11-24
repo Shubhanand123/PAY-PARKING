@@ -253,6 +253,7 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></div>
+          <span id="upd-slot" />
           {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         <h1>Owner dashboard</h1>
@@ -286,6 +287,7 @@ function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[
     <header className={'gh gh-' + view}>
       <div className="gh-row">
         <span className="gh-brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span>
+        <span id="upd-slot" />
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (net ? ' off' : waiting ? ' wait' : '')}><i />{net ? 'Offline' : waiting ? 'Sending' : 'Online'}{waiting > 0 && <b className="num"> · {waiting}</b>}</span>
       </div>
