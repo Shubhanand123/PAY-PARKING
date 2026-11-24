@@ -7,7 +7,7 @@
 }
 
 /* ---------- H2 header ---------- */
-.gh { position: sticky; top: 0; z-index: 20; color: #fff; background: var(--gh-bg); padding: calc(var(--safe-top) + 10px) 14px 12px; border-radius: 0 0 20px 20px; box-shadow: 0 8px 20px -12px rgb(6 22 60 / 70%); }
+.gh { position: sticky; top: 0; z-index: 20; contain: layout paint; will-change: transform; color: #fff; background: var(--gh-bg); padding: calc(var(--safe-top) + 10px) 14px 12px; border-radius: 0 0 20px 20px; box-shadow: 0 8px 20px -12px rgb(6 22 60 / 70%); }
 .gh-row { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .gh-mark { width: 30px; height: 30px; border-radius: 9px; background: #fff; color: #16245c; display: grid; place-items: center; flex: none; }
 .gh-name { font-weight: 800; letter-spacing: .12em; font-size: 16px; flex: 1; min-width: 0; }
@@ -19,7 +19,11 @@
 .gh-net i { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 6px #22c55e; }
 .gh-net.off i { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
 .gh-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; padding: 4px; border-radius: 14px; background: rgb(0 0 0 / 22%); }
-.gh-tab { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; border-radius: 11px; color: rgb(255 255 255 / 78%); font-weight: 700; font-size: 15px; text-decoration: none; transition: background-color 160ms var(--ease), color 160ms var(--ease); }
+.gh-flow { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; min-height: 50px; border-radius: 14px; font-weight: 800; font-size: 15px; }
+.gh-flow small { font-size: 14px; font-weight: 600; opacity: .85; }
+.gh-flow.entry { background: #fff; color: var(--gate-entry); }
+.gh-flow.exit { background: var(--gate-exit); color: #fff; }
+.gh-tab { -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; border-radius: 11px; color: rgb(255 255 255 / 78%); font-weight: 700; font-size: 15px; text-decoration: none; }
 .gh-tab.entry.on { background: #fff; color: var(--gate-entry); box-shadow: 0 4px 12px -6px rgb(0 0 0 / 50%); }
 .gh-tab.exit.on { background: var(--gate-exit); color: #fff; box-shadow: 0 4px 14px -6px rgb(249 115 22 / 80%); }
 .gh + .content { margin-top: 0; padding-top: 12px; gap: 10px; }
@@ -163,3 +167,17 @@
   .slip { -webkit-mask: none !important; mask: none !important; background: #fff !important; }
   .paid-glow, .paid-flash { display: none; }
 }
+
+/* v1.5: roomier bill card, pay screen fills the screen */
+.tk2-head { gap: 8px; }
+.tk2-head .ind-plate { flex: 1; min-width: 0; justify-content: flex-start; white-space: nowrap; font-size: clamp(17px, 5.6vw, 22px); padding-block: 3px; }
+.tk2-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.veh-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; background: var(--color-accent-subtle); color: var(--color-accent-text); font-weight: 700; font-size: 13px; }
+.exit-bill { min-height: calc(100dvh - 160px - var(--safe-top)); }
+.exit-bill .actionbar { margin-top: auto; }
+.q9 { min-height: calc(100dvh - 160px - var(--safe-top)); }
+.q9-top { display: flex; justify-content: space-between; gap: 8px; }
+.q9-top .btn { min-height: 40px; font-size: 14px; }
+.danger-text { color: var(--color-danger-text) !important; }
+.q9-code { width: min(100%, 340px); }
+.q9-card { flex: 1; justify-content: center; }

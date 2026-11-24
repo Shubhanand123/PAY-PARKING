@@ -202,7 +202,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
   const role = given === 'open' ? undefined : given
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
-  const [flow, setFlow] = useState(false) // slip, QR or receipt on screen: hide the Entry/Exit switch
+  const [flow, setFlow] = useState('') // slip, QR or receipt on screen: hide the Entry/Exit switch
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
   const say = useCallback((m: string, bad?: boolean) => setToast({ m, bad }), [])
   const done = useCallback(() => setToast(null), [])
@@ -247,7 +247,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
 
 /** H2 header for the gates: colour-coded Entry (blue) / Exit (orange) switch, clock and connection light.
  *  While a slip, a payment QR or a receipt is on screen the switch is replaced by a gate badge. */
-function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: boolean }) {
+function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: string }) {
   const now = useNow(15000)
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => {
@@ -261,10 +261,10 @@ function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: 
       <div className="gh-row">
         <span className="gh-mark"><Ico n="p" size={22} /></span>
         <b className="gh-name">PARKAR</b>
-        {(flow || tabs.length < 2) && <span className={'gh-gate ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={15} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}</span>}
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (online ? '' : ' off')}><i />{online ? 'Online' : 'Offline'}</span>
       </div>
+      {(flow || tabs.length < 2) && <div className={'gh-flow ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={18} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}{flow && <small>· {flow}</small>}</div>}
       {!flow && tabs.length > 1 && <nav className="gh-tabs" aria-label="Choose gate">
         {tabs.map(v => <a key={v} href={'#/' + v} className={'gh-tab ' + v + (view === v ? ' on' : '')} aria-current={view === v}>
           <Ico n={v === 'entry' ? 'scan' : 'out'} size={18} />{v === 'entry' ? 'Entry' : 'Exit'}</a>)}

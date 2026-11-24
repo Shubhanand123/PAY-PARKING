@@ -6,7 +6,7 @@ import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-read
 import { createWedgeReader } from './scanner-wedge'
 import { nativeApp } from './native'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
   isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, type DB, type Receipt, type Staff, type Ticket,
@@ -94,7 +94,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
 }
 
 // ---------- entry ----------
-export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: boolean) => void }) {
+export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: string) => void }) {
   useEffect(() => { if (!nativeApp) void warmPlateReader().catch(() => {}) }, [])
   const [plate, setPlate] = useState('')
   const [conf, setConf] = useState<number | null>(null)
@@ -114,8 +114,8 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
   const prepaid = db.settings.payAtEntry && paymentTiming === 'before' && !already
   const rate = tv.rates[cat]
   const advance = prepaid && rate ? prepaidPrice(hours, rate) : 0
-  useEffect(() => { onFlow?.(Boolean(done)) }, [done, onFlow])
-  useEffect(() => () => onFlow?.(false), [onFlow])
+  useLayoutEffect(() => { onFlow?.(done ? 'Parking slip' : '') }, [done, onFlow])
+  useLayoutEffect(() => () => onFlow?.(''), [onFlow])
 
   const confirm = async () => {
     if (busy) return // one tap only
@@ -215,7 +215,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
 }
 
 // ---------- exit ----------
-export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: boolean) => void }) {
+export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: string) => void }) {
   useEffect(() => {
     if (!nativeApp) void warmPlateReader().catch(() => {})
     void import('jsqr').catch(() => {})
@@ -236,11 +236,11 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
   const now = useNow(10000)
   const t = id ? db.tickets.find(x => x.id === id) : undefined
   // An open UPI QR on this ticket: go straight to the pay screen.
-  useEffect(() => { if (t?.onlineCheckout && t.status === 'inside') setPaying(true) }, [t?.id, t?.onlineCheckout?.orderId, t?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (t?.onlineCheckout && t.status === 'inside') setPaying(true) }, [t?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // H2 header: the Entry/Exit switch shows only on the lookup and the bill, not on the QR or the receipt.
-  const flow = Boolean(t && (paying || t.status === 'paid' || t.status === 'exited'))
-  useEffect(() => { onFlow?.(flow) }, [flow, onFlow])
-  useEffect(() => () => onFlow?.(false), [onFlow])
+  const flow = !t ? '' : paying ? 'Pay by UPI' : t.status === 'paid' || t.status === 'exited' ? 'Receipt' : ''
+  useLayoutEffect(() => { onFlow?.(flow) }, [flow, onFlow])
+  useLayoutEffect(() => () => onFlow?.(''), [onFlow])
   const active = db.tickets.filter(x => x.status === 'inside' || x.status === 'paid')
   const nq = normPlate(q)
   const filtered = nq.length >= 2 ? active.filter(x => x.plate.includes(nq) || x.id.replace('-', '').includes(nq)) : active
@@ -327,7 +327,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
     // Q9: pay by UPI QR. Stays on screen until the "received" moment has played, then the receipt opens.
     if (paying && (t.status === 'inside' || t.status === 'paid')) return (
       <PosPay t={t} amount={t.status === 'inside' ? b.duePaise : (t.totalPaise ?? b.totalPaise) - b.prepaidPaise} vehicle={cat?.name ?? ''} paid={t.status === 'paid'}
-        onRevision={setRev} onDone={() => setPaying(false)} onCash={() => setPaying(false)} />
+        onRevision={setRev} onDone={() => setPaying(false)} onCash={() => setPaying(false)} onBack={() => setPaying(false)} />
     )
 
     // Receipt: full screen, green light from the bottom while the vehicle is paid but still here.
@@ -370,14 +370,11 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
       <div className="stack exit-bill">
         <div className="card tk2">
           <div className="tk2-head">
-            <button className="icon-btn" onClick={reset} aria-label="New lookup"><Ico n="back" /></button>
-            <span className="veh-tile sm"><Ico n={cat?.icon ?? 'car'} size={30} /></span>
-            <div className="tk-id">
-              <span className="ind-plate"><i />{prettyPlate(t.plate)}</span>
-              <div className="tk-sub"><span className="muted small">{cat?.name} · {t.id}</span><StatusPill t={t} />{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
-            </div>
+            <button className="icon-btn" onClick={reset} aria-label="Back to lookup"><Ico n="back" /></button>
+            <span className="ind-plate"><i />{prettyPlate(t.plate)}</span>
             {!t.onlineCheckout && <button className="icon-btn more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>}
           </div>
+          <div className="tk2-sub"><span className="veh-chip"><Ico n={cat?.icon ?? 'car'} size={20} />{cat?.name}</span><span className="muted small">{t.id}</span><StatusPill t={t} />{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
           {menu && <div className="tk2-menu"><button className="link danger" onClick={() => { setMenu(false); setCancelling(true) }}><Ico n="x" size={16} /> Cancel this ticket</button></div>}
           <SlabBar from={t.entryAt} to={now} firstHours={rate.firstHours} firstPaise={rate.firstPaise} perHourPaise={rate.perHourPaise} />
         </div>
@@ -399,7 +396,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
         {cancelCard}
         {!stale && (b.duePaise
           ? <div className="actionbar duo">
-            {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>UPI</b><small>Razorpay QR</small></span></button>}
+            {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>{t.onlineCheckout ? 'Show QR' : 'UPI'}</b><small>{t.onlineCheckout ? 'QR still open' : 'Razorpay QR'}</small></span></button>}
             <button className="btn btn-xl pay-btn cash" disabled={busy || Boolean(t.onlineCheckout)} onClick={() => act('', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
               <Ico n="cash" size={24} /><span><b>Cash</b><small>received {rupees(b.duePaise)}</small></span></button>
           </div>
@@ -428,6 +425,9 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
           return true
         }} onRead={result => {
           setScanningPlate(false)
+          const exact = active.find(y => y.plate === result.plate)
+          const rivals = active.filter(y => y !== exact && (result.alternatives.includes(y.plate) || differsByOneConfusableCharacter(result.plate, y.plate)))
+          if (exact && !rivals.length) { open(exact, 'plate'); return }
           setQ(result.plate)
           setPick(null)
           setScannedPlate(true)
