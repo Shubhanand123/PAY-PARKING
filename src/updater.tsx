@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 
 const CHECK_EVERY = 60 * 60_000      // normal updates: once an hour (and when the app opens)
 const URGENT_EVERY = 3 * 60_000      // important updates: a tiny file is checked every 3 minutes
-const IDLE_NORMAL = 30_000, IDLE_URGENT = 2_000 // important: as soon as the POS is free
+const IDLE_NORMAL = 3 * 60_000, IDLE_URGENT = 10_000 // home screen untouched: 3 min normally, 10 s if important
 
 // ---------- "busy" signals from the gate screens ----------
 const busy = new Map<string, boolean>()
@@ -15,12 +15,12 @@ export function setBusy(key: string, value: boolean) { busy.set(key, value) }
 let lastTouch = Date.now()
 for (const ev of ['pointerdown', 'keydown', 'input', 'touchstart', 'wheel'] as const) addEventListener(ev, () => { lastTouch = Date.now() }, { passive: true, capture: true })
 
-function safeNow(urgent: boolean) {
+function safeNow(urgent: boolean, tapped = false) {
   if ([...busy.values()].some(Boolean)) return false
   const active = document.activeElement
-  if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return false
-  if (document.visibilityState !== 'visible') return false
-  return Date.now() - lastTouch >= (urgent ? IDLE_URGENT : IDLE_NORMAL)
+  if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) && (active as HTMLInputElement).value) return false
+  if (!tapped && document.visibilityState !== 'visible') return false
+  return tapped || Date.now() - lastTouch >= (urgent ? IDLE_URGENT : IDLE_NORMAL)
 }
 
 // ---------- finding a new version ----------
@@ -57,6 +57,7 @@ export function UpdateBar() {
   useEffect(() => { const f = () => setDashboard(location.hash.startsWith('#/owner')); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
   const [ready, setReady] = useState<{ urgent: boolean } | null>(null)
   const [switching, setSwitching] = useState(false)
+  const [hint, setHint] = useState(false)
 
   useEffect(() => {
     if (!import.meta.env.PROD || !currentScript()) return
@@ -89,15 +90,19 @@ export function UpdateBar() {
       if (!safeNow(ready.urgent)) return
       clearInterval(timer)
       setSwitching(true)
-      setTimeout(() => location.reload(), 900)
+      setTimeout(() => location.reload(), 400)
     }, 1000)
     return () => clearInterval(timer)
   }, [ready, dashboard])
 
   if (!ready) return null
-  if (!dashboard) return switching ? <div className="upd-strip" role="status"><span className="upd-spin" />Updating PARKER…</div> : null
-  return <div className={'upd-bar' + (ready.urgent ? ' urgent' : '')} role="status">
-    <span>{ready.urgent ? 'Important update ready' : 'Update ready'}</span>
-    <button onClick={() => location.reload()}>Tap to refresh</button>
-  </div>
+  if (switching) return <div className="upd-strip" role="status"><span className="upd-spin" />Updating PARKER…</div>
+  // A small button at the top: tap to update now (the POS only when nothing is open), otherwise it switches by itself.
+  const now = () => {
+    if (!dashboard && !safeNow(true, true)) { setHint(true); setTimeout(() => setHint(false), 2500); return }
+    setSwitching(true); setTimeout(() => location.reload(), 400)
+  }
+  return <button className={'upd-pill' + (ready.urgent ? ' urgent' : '')} onClick={now} aria-label="Update available. Tap to update now.">
+    <span className="upd-dot" />{hint ? 'Finish this vehicle first' : ready.urgent ? 'Important update' : 'Update available'}
+  </button>
 }

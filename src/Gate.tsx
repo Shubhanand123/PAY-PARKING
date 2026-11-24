@@ -190,7 +190,10 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
         <div className="cats">
           {db.categories.filter(c => c.active).map(c => (
             <button key={c.id} className={'cat' + (cat === c.id ? ' on' : '')} onClick={() => setCat(c.id)} aria-pressed={cat === c.id}>
-              <Ico n={c.icon} size={42} /><span>{c.name}</span><small>{rupees(tv.rates[c.id].firstPaise)} / {tv.rates[c.id].firstHours}h</small>
+              <span className={'cat-ico v-' + c.id}><Ico n={c.icon} size={34} /></span>
+              <span className="cat-name">{c.name}</span>
+              <span className="cat-rate"><b className="num">{rupees(tv.rates[c.id].firstPaise)}</b><em>/ {tv.rates[c.id].firstHours}h</em></span>
+              <small className="cat-more num">then {rupees(tv.rates[c.id].perHourPaise)}/hr</small>
             </button>
           ))}
         </div>
