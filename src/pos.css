@@ -375,9 +375,6 @@
 .cats .cat { gap: 4px !important; padding: 10px 4px 9px !important; min-height: 118px !important; justify-content: flex-start !important; border-radius: 16px; }
 .cat-ico { width: 52px; height: 44px; border-radius: 13px; display: grid; place-items: center; background: var(--cat-bg, var(--color-bg-subtle)); color: var(--cat-fg, var(--color-text)); transition: transform 160ms var(--ease); }
 .cat-ico svg { stroke-width: 1.6; }
-.v-bike { --cat-bg: #e7f6ef; --cat-fg: #017a61; } .v-auto { --cat-bg: #fff3d6; --cat-fg: #8f5a01; }
-.v-car { --cat-bg: #e7efff; --cat-fg: #2248a3; } .v-suv { --cat-bg: #efe9ff; --cat-fg: #5b3db3; }
-.v-van { --cat-bg: #ffe9e6; --cat-fg: #b72c2f; } .v-truck { --cat-bg: #e8edf3; --cat-fg: #333b47; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cat-ico { --cat-bg: rgb(255 255 255 / 8%); } }
 .cat-name { font-weight: 700 !important; font-size: 13px !important; line-height: 1.15; text-align: center; color: var(--color-text); }
 .cat-rate { display: inline-flex; align-items: baseline; gap: 3px; font-family: var(--font); }
@@ -388,3 +385,9 @@
 .cat.on .cat-rate b, .cat.on .cat-name { color: var(--color-accent-text); }
 .cats .cat .cat-ico svg { color: inherit !important; scale: 1 !important; }
 .cats .cat.on .cat-ico svg { color: #fff !important; }
+
+/* Vehicle tiles: no colours, just a clean icon; the selected one turns blue */
+.cat-ico { background: transparent !important; color: var(--color-text) !important; height: 40px !important; }
+.cat.on .cat-ico { background: transparent !important; color: var(--color-accent-text) !important; transform: scale(1.06); }
+.cats .cat.on .cat-ico svg { color: var(--color-accent-text) !important; }
+.cat-ico svg { width: 38px; height: 38px; }
