@@ -570,7 +570,8 @@ Deno.serve(async request => {
     if (action === 'snapshot') return reply({ snapshot: publishState(await state(), role) })
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
     const command = actions[action as keyof typeof actions]
-    const allowed = role === 'open' ? true : role === 'both'
+    // Open access covers the gates only. Rates, settings and the free list need the signed-in Owner.
+    const allowed = role === 'open' ? command.roles.includes('entry') || command.roles.includes('exit') : role === 'both'
       ? command.roles.includes('entry') || command.roles.includes('exit')
       : command.roles.includes(role)
     if (!allowed) return reply({ error: 'This device cannot perform that action.' }, 403)

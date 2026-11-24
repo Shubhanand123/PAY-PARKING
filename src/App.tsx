@@ -31,10 +31,11 @@ export default function App() {
   return !apiEnabled ? <LocalApp /> : openAccess ? <OpenApp /> : <ConnectedApp />
 }
 
-/** No sign-in: every device gets Entry, Exit and Owner, all on the shared server records. */
+/** Gates need no sign-in. The Owner dashboard needs the Owner's mobile number and password. */
 function OpenApp() {
   const [snapshot, setSnapshot] = useState<Snapshot>()
   const [customer, setCustomer] = useState<DB>()
+  const [sessionId, setSessionId] = useState<string | null | undefined>(auth ? undefined : null)
   const [error, setError] = useState('')
   const [r, setR] = useState(route())
   useEffect(() => {
@@ -45,6 +46,11 @@ function OpenApp() {
     return () => { removeEventListener('hashchange', changed); removeEventListener('parking-snapshot', updated) }
   }, [])
   useEffect(() => {
+    if (!auth) return
+    const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => setSessionId(session?.user.id ?? null))
+    return () => subscription.unsubscribe()
+  }, [])
+  useEffect(() => {
     let active = true
     const refresh = async () => {
       try {
@@ -53,15 +59,39 @@ function OpenApp() {
           if (active) setCustomer(response.db)
         } else await callParking('snapshot')
         if (active) setError('')
-      } catch (failure) { if (active) setError((failure as Error).message) }
+      } catch (failure) {
+        if (!active) return
+        // An expired or replaced Owner session: drop it and fall back to the open gate view.
+        if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await auth?.auth.signOut({ scope: 'local' })
+        setError((failure as Error).message)
+      }
     }
     void refresh()
     const poll = setInterval(refresh, 5000)
     return () => { active = false; clearInterval(poll) }
-  }, [r])
+  }, [r, sessionId])
+
+  async function activateOwner(key: string) {
+    const response = await callParking('snapshot', [], key)
+    if (response.snapshot?.role !== 'owner') throw new Error('Enter an Owner setup code.')
+    setDeviceKey(key)
+    setSnapshot(response.snapshot)
+  }
+  async function signOut() {
+    setDeviceKey('')
+    await auth?.auth.signOut({ scope: 'local' })
+    setSnapshot(undefined)
+    location.hash = '/entry'
+  }
+
   if (r.startsWith('t/')) return customer ? <ParkingApp db={customer} /> : <main className="content"><p role="status">{error || 'Loading ticket…'}</p></main>
+  const owner = snapshot?.role === 'owner'
+  if (r === 'owner' && !nativeApp && !owner) {
+    if (sessionId === undefined || (sessionId && !error)) return <main className="screen"><div className="content"><p role="status">Checking Owner sign-in…</p></div></main>
+    return <Login onOwnerSetup={activateOwner} error={sessionId ? error : ''} />
+  }
   if (!snapshot) return <main className="screen"><div className="content"><p role={error ? 'alert' : 'status'}>{error || 'Connecting to parking records…'}</p></div></main>
-  return <><ParkingApp db={snapshot.db} />{error && <div className="content"><p role="alert">{error} Reconnect before collecting cash.</p></div>}</>
+  return <><ParkingApp db={snapshot.db} signOut={owner ? signOut : undefined} />{error && <div className="content"><p role="alert">{error} Reconnect before collecting cash.</p></div>}</>
 }
 
 function LocalApp() {

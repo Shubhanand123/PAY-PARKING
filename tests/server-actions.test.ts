@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { billFor, createEntry, runAction, seed, type DB } from '../src/engine.ts'
 
-// The server accepts the new receipt and free-vehicle actions, and still understands older devices.
-test('server: receipt prints, free vehicles, and older print calls', async () => {
+// The server accepts the new receipt actions, still understands older devices, and keeps Owner actions behind sign-in.
+test('server: receipt prints, older print calls, and Owner-only actions', async () => {
   const db = seed(false)
   const ticket = runAction(db, 'ravi', createEntry, 'GA07AB1234', 'car', 0).ticket
   ticket.entryAt -= 3 * 3600_000
@@ -42,9 +42,9 @@ test('server: receipt prints, free vehicles, and older print calls', async () =>
   assert.equal(find().receiptPrints, 1)
   assert.equal(find().prints, 1, 'receipt print does not count as a slip reprint')
 
-  assert.equal((await call('addFreeVehicle', ['GA 01 Z 9087', 'Police'])).status, 200, 'note is optional')
-  assert.equal(snapshot.db.freeVehicles?.[0].plate, 'GA01Z9087')
-  assert.equal((await call('addFreeVehicle', ['NOT A PLATE', 'Police', null])).status, 409)
-  assert.equal((await call('removeFreeVehicle', ['GA01Z9087'])).status, 200)
-  assert.equal(snapshot.db.freeVehicles?.[0].active, false)
+  // Open access is for the gates only: Owner actions need the signed-in Owner.
+  for (const [action, args] of [['addFreeVehicle', ['GA 01 Z 9087', 'Police']], ['removeFreeVehicle', ['GA01Z9087']], ['saveSettings', [snapshot.db.settings]], ['publishTariff', [5, {}, 'x']]] as const) {
+    assert.equal((await call(action, [...args])).status, 403, action + ' refused without the Owner sign-in')
+  }
+  assert.equal(snapshot.db.freeVehicles, undefined, 'nothing changed')
 })
