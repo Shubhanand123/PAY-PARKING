@@ -423,10 +423,12 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
       <div className="card">
         <button className="btn btn-primary btn-xl" onClick={() => setScanningPlate(true)}><Ico n="scan" /> Scan ticket or plate</button>
         <label className="lbl" htmlFor="q">Manual lookup</label>
-        <input id="q" className="field plate-field" value={q} autoComplete="off" placeholder="Plate or ticket" onChange={e => {
-          setQ(e.target.value); setPick(null); setScannedPlate(false); setPlateAlternatives([])
-        }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
-        <button className="btn btn-ghost" onClick={() => find('auto')} disabled={!q.trim()}><Ico n="search" /> Find ticket</button>
+        <div className="find-row">
+          <input id="q" className="field plate-field" value={q} autoComplete="off" enterKeyHint="search" placeholder="Plate or ticket" onChange={e => {
+            setQ(e.target.value); setPick(null); setScannedPlate(false); setPlateAlternatives([])
+          }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
+          <button className="btn btn-primary find-btn" onClick={() => find('auto')} disabled={!q.trim()} aria-label="Find ticket"><Ico n="search" size={22} /> Find</button>
+        </div>
         {scanningPlate && <PlateScanner onClose={() => setScanningPlate(false)} onQr={value => {
           const token = ticketTokenFromQr(value)
           if (!token) return false
