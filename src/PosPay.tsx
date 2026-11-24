@@ -137,6 +137,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
         <li><span><Ico n="check" /></span>Approve {rupees(amount)}</li>
       </ol>
       {code?.link && <p className="tiny muted center">Scan with the phone camera and pay on Razorpay.</p>}
+      {code?.image && !paid && <a className="btn btn-primary btn-lg" href={code.image} target="_blank" rel="noopener noreferrer"><Ico n="qr" /> Open QR on Razorpay screen</a>}
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
