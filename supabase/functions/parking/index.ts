@@ -265,7 +265,14 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
         const receiptId = fresh.id + '-' + crypto.randomUUID().slice(0, 8)
         const quote = { amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } as const
         // UPI QR needs Razorpay's QR Codes feature on the account; without it, fall back to a payment link shown as a QR.
-        const qr = payload.upi_qr === true ? await createRazorpayQr(razorpay, amount, fresh.id).catch(() => undefined) : undefined
+        let qrError = ''
+        const qr = payload.upi_qr === true ? await createRazorpayQr(razorpay, amount, fresh.id).catch((error: unknown) => {
+          qrError = error instanceof Error ? error.message : String(error)
+          console.error('Razorpay UPI QR failed for ' + fresh.id + ': ' + qrError)
+          return undefined
+        }) : undefined
+        // The POS asked for a direct UPI QR: never fall back to a payment link (its page asks the customer for a mobile number).
+        if (payload.upi_qr === true && !qr) return reply({ error: 'UPI QR could not be made. ' + (qrError || 'Razorpay gave no reason.') }, 502)
         if (qr) {
           if (!razorpayQrId.test(qr.id) || qr.payment_amount !== amount || qr.status !== 'active' || !(qr.image_content || qr.image_url)) {
             throw new RazorpayServiceError('Razorpay returned an unexpected QR code.')
