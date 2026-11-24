@@ -78,10 +78,13 @@ function OpenApp() {
       }
     }
     void refresh()
-    const poll = setInterval(refresh, 5000)
+    // Dashboard: every 2 s so payments show almost at once. Gates: every 5 s.
+    const poll = setInterval(refresh, r === 'owner' ? 2000 : 5000)
     const back = () => void refresh()
+    const seen = () => { if (document.visibilityState === 'visible') void refresh() }
     addEventListener('online', back)
-    return () => { active = false; clearInterval(poll); removeEventListener('online', back) }
+    document.addEventListener('visibilitychange', seen)
+    return () => { active = false; clearInterval(poll); removeEventListener('online', back); document.removeEventListener('visibilitychange', seen) }
   }, [r, sessionId])
 
   async function activateOwner(key: string) {
@@ -166,10 +169,13 @@ function ConnectedApp() {
       }
     }
     void refresh()
-    const poll = setInterval(refresh, 5000)
+    // Dashboard: every 2 s so payments show almost at once. Gates: every 5 s.
+    const poll = setInterval(refresh, r === 'owner' ? 2000 : 5000)
     const back = () => void refresh()
+    const seen = () => { if (document.visibilityState === 'visible') void refresh() }
     addEventListener('online', back)
-    return () => { active = false; clearInterval(poll); removeEventListener('online', back) }
+    document.addEventListener('visibilitychange', seen)
+    return () => { active = false; clearInterval(poll); removeEventListener('online', back); document.removeEventListener('visibilitychange', seen) }
   }, [r, sessionId])
 
   async function activateOwner(key: string) {
