@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep the native scanner and its Capacitor plugin (callbacks are found by annotation at runtime).
+-keep class com.saiexpress.payparking.** { *; }
+-keep class com.getcapacitor.** { *; }
+-keepattributes *Annotation*
