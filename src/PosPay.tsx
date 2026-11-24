@@ -3,6 +3,7 @@ import { dur, prettyPlate, rupees, type Ticket } from './engine'
 import { callParkingPayment } from './parking-api'
 import { chime } from './done'
 import { confirmUpi } from './actions'
+import { cashCelebrate } from './celebrate'
 import { Ico, QR } from './ui'
 
 type Order = { order_id: string; amount: number; link_url?: string; upi_qr?: string; qr_image?: string }
@@ -40,6 +41,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
   const [confirmCash, setConfirmCash] = useState(false)
   const [now, setNow] = useState(Date.now())
   const busyRef = useRef(false)
+  const celebrated = useRef(false) // 'Customer paid' already played the paid animation and chime
   const started = useRef(false)
 
   useEffect(() => { if (fromTicket) setCode(fromTicket) }, [order?.upiQr, order?.qrImage, order?.linkUrl]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,6 +96,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
   // Money received: chime, show it for a moment, then open the receipt.
   useEffect(() => {
     if (!paid) return
+    if (celebrated.current) { onDone(); return } // the paid animation is already playing
     chime()
     const i = setTimeout(onDone, 1100)
     return () => clearTimeout(i)
@@ -156,7 +159,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
-        {state === 'waiting' && <button className="btn btn-success btn-lg q9-paidbtn" disabled={busy} onClick={() => void run(async () => { const r = await confirmUpi('sunil', t.id, t.rev); onRevision(r.rev) })}><Ico n="check" /> Customer paid</button>}
+        {state === 'waiting' && <button className="btn btn-success btn-lg q9-paidbtn" disabled={busy} onClick={() => void run(async () => { const r = await confirmUpi('sunil', t.id, t.rev); celebrated.current = true; cashCelebrate(amount, prettyPlate(t.plate)); onRevision(r.rev) })}><Ico n="check" /> Customer paid</button>}
         {!paid && !confirmCash && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
         {message && <p className="msg bad" role="alert">{message}</p>}
         {!paid && <p className="q9-foot">Checked automatically every 1.5 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
