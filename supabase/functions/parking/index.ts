@@ -189,6 +189,12 @@ function valid(kind: string, value: unknown, db: parking.DB): boolean {
 }
 
 type State = { version: number; db: parking.DB }
+// The gate lock is read at most every 10 s, so open-gate requests stay fast.
+let lockCache = { value: false, at: 0 }
+async function gatesLocked() {
+  if (Date.now() - lockCache.at > 10_000) lockCache = { value: Boolean((await state()).db.gateLock), at: Date.now() }
+  return lockCache.value
+}
 const statePath = 'parking_runtime?id=eq.true'
 const read = () => database<State[]>(statePath + '&select=db,version')
 
@@ -236,7 +242,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   const ticketId = payload.ticket_id
   if (!actor && (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token))) return reply({ error: 'Ticket access is required.' }, 401)
   if (actor && !['owner', 'exit', 'both', 'open'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
-  if (actor && (typeof ticketId !== 'string' || !/^T-\d{6,}$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
+  if (actor && (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
   const select = (db: parking.DB) => db.tickets.find(item => actor ? item.id === ticketId : item.token === token)
   const initial = await state()
   const ticket = select(initial.db)
@@ -482,6 +488,23 @@ Deno.serve(async request => {
       deviceLabel = device.label
     }
 
+    // Gates locked by the Owner: only approved POS machines (device key) or signed-in accounts may use the gates.
+    if (role === 'open' && await gatesLocked()) {
+      return reply({ error: 'This POS is not set up yet. Scan its setup QR from the Owner dashboard (POS devices).', code: 'POS_NOT_APPROVED' }, 403)
+    }
+    if (action === 'setGateLock') {
+      if (role !== 'owner') return reply({ error: 'Only the Owner can lock the gates.' }, 403)
+      if (typeof args[0] !== 'boolean') return reply({ error: 'Choose on or off.' }, 400)
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { db, version } = await state()
+        db.gateLock = args[0]
+        lockCache = { value: args[0], at: Date.now() }
+        db.audit.push({ id: crypto.randomUUID().slice(0, 8), at: Date.now(), by: 'Owner', kind: 'settings', text: args[0] ? 'Gates locked: only approved POS machines' : 'Gates unlocked: any device with the link' } as parking.DB['audit'][number])
+        const saved = await saveState(db, version)
+        if (saved) return reply({ result: args[0], snapshot: publishState(saved, role) })
+      }
+      return reply({ error: 'Try again.' }, 409)
+    }
     if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label ?? deviceLabel })
     if (action === 'issueOwnerCode') {
       if (role !== 'owner') return reply({ error: 'Only the owner can issue a recovery code.' }, 403)
@@ -612,7 +635,7 @@ Deno.serve(async request => {
           if (seen.has(op.opId)) continue
           const problem = applyOp(db, op, map)
           seen.add(op.opId)
-          if (problem) issues.push({ at: op.at, opId: op.opId, ticketId: op.ticketId, device: op.device, text: problem })
+          if (problem) issues.push({ at: op.at, opId: op.opId, ticketId: op.ticketId, device: deviceLabel ?? op.device, text: problem })
         }
         db.offlineSeen = [...seen].slice(-3000)
         db.offlineIssues = [...(db.offlineIssues ?? []), ...issues].slice(-500)

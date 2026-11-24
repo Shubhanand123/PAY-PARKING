@@ -6,7 +6,7 @@ import {
   activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
-import { Ico, Pill, useNow } from './ui'
+import { Ico, Pill, QR, useNow } from './ui'
 import { StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
 import { Customers, FreeVehicles, OfflineChecks, TicketPaper } from './OwnerExtras'
@@ -16,7 +16,7 @@ type Tab = 'overview' | 'tickets' | 'customers' | 'free' | 'audit' | 'rates' | '
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
   const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['free', 'Free vehicles', 'check'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
-  if (apiEnabled && !openAccess) tabs.push(['devices', 'Devices', 'gear'])
+  if (apiEnabled) tabs.push(['devices', 'POS devices', 'key'])
   return (
     <div className="owner">
       <nav className="tabs" aria-label="Owner sections">
@@ -29,7 +29,7 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       {tab === 'free' && <FreeVehicles db={db} me={me} toast={toast} />}
       {tab === 'audit' && <AuditLog db={db} />}
       {tab === 'rates' && <Rates db={db} me={me} toast={toast} />}
-      {tab === 'devices' && <div className="stack"><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /><DevicesTab toast={toast} /></div>}
+      {tab === 'devices' && <div className="stack"><GateLockCard db={db} toast={toast} /><DevicesTab toast={toast} />{!openAccess && <><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /></>}</div>}
       {tab === 'settings' && <SettingsTab db={db} me={me} toast={toast} />}
       </div>
     </div>
@@ -387,7 +387,9 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [deviceName, setDeviceName] = useState('')
+  const [deviceGate, setDeviceGate] = useState<'entry' | 'exit' | 'both'>('both')
   const [inviteLink, setInviteLink] = useState('')
+  const [inviteName, setInviteName] = useState('')
 
   useEffect(() => {
     let active = true
@@ -414,8 +416,9 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
     setBusy(true)
     setInviteLink('')
     try {
-      const { result } = await callParking<{ code: string }>('issuePosDeviceLink', [deviceName.trim(), 'both'])
+      const { result } = await callParking<{ code: string }>('issuePosDeviceLink', [deviceName.trim(), deviceGate])
       setInviteLink(location.href.split('#')[0] + '#/pos/' + result.code)
+      setInviteName(deviceName.trim())
       setDeviceName('')
       setRefresh(current => current + 1)
     } catch (failure) { toast((failure as Error).message, true) }
@@ -423,16 +426,25 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
   }
 
   return <section className="card stack" aria-labelledby="devices-title">
-    <h2 id="devices-title">Parking devices</h2>
+    <h2 id="devices-title">POS machines</h2>
+    <p className="muted small">Add each POS once. Then, on that POS, open PARKAR and tap <b>Scan setup QR</b> (or open the link on it). Its offline tickets and any problems show under this name.</p>
     <form className="stack" onSubmit={event => void createDeviceLink(event)}>
-      <label className="setf"><span className="lbl">POS device name</span>
-        <input className="field small-field" maxLength={80} value={deviceName} onChange={event => setDeviceName(event.target.value)} placeholder="e.g. Main gate POS" required />
+      <label className="setf"><span className="lbl">POS name</span>
+        <input className="field small-field" maxLength={80} value={deviceName} onChange={event => setDeviceName(event.target.value)} placeholder="e.g. Gate 1 Entry" required />
       </label>
-      <button className="btn btn-primary" disabled={busy || !deviceName.trim()}>Create direct POS link</button>
+      <label className="setf"><span className="lbl">This POS works at</span>
+        <select className="field small-field" value={deviceGate} onChange={event => setDeviceGate(event.target.value as 'entry' | 'exit' | 'both')}>
+          <option value="both">Entry and Exit</option><option value="entry">Entry only</option><option value="exit">Exit only</option>
+        </select>
+      </label>
+      <button className="btn btn-primary" disabled={busy || !deviceName.trim()}>Add POS and show setup QR</button>
     </form>
-    {inviteLink && <div className="banner banner-info" role="status"><div className="stack">
-      <p>Open this private link to go straight to Entry and Exit. It works until you deactivate it here.</p>
-      <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy POS link</button>
+    {inviteLink && <div className="banner banner-info pos-invite" role="status"><div className="stack">
+      <b>Setup QR for {inviteName}</b>
+      <p className="small">On that POS: open PARKAR → <b>Scan setup QR</b> and point it here. This QR is private: it gives gate access until you remove the POS below.</p>
+      <div className="pos-qr"><QR text={inviteLink} size={220} /></div>
+      <button className="btn btn-ghost" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy setup link instead</button>
+      <button className="btn btn-ghost" onClick={() => setInviteLink('')}>Done</button>
     </div></div>}
     {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
       : !devices ? <p role="status">Loading devices…</p>
@@ -440,7 +452,7 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
       : <ul className="device-list">{devices.map(device => <li key={device.id}>
         <div><b>{device.label}</b><div className="muted small">{device.role === 'owner' ? 'Owner' : device.role === 'both' ? 'Entry and exit' : device.role === 'entry' ? 'Entry gate' : 'Exit gate'}{device.current ? ' · This browser' : ''}</div></div>
         <Pill tone={device.enabled ? 'ok' : 'warn'}>{device.enabled ? 'Active' : device.pending ? 'Pending setup' : 'Inactive'}</Pill>
-        {(device.enabled || device.pending) && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>{device.pending ? 'Cancel link' : 'Deactivate'}</button>}
+        {(device.enabled || device.pending) && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>{device.pending ? 'Cancel link' : 'Remove POS'}</button>}
       </li>)}</ul>}
     {selected && <div className="banner banner-warn" role="group" aria-label="Confirm deactivation">
       <div className="stack">
@@ -605,5 +617,29 @@ function OwnerAccessTab({ toast }: { toast: (message: string, bad?: boolean) => 
       <code className="owner-code">{invite.code}</code>
       <button className="btn btn-ghost fit" onClick={() => void navigator.clipboard.writeText(invite.code).then(() => toast('Recovery code copied'), () => toast('Could not copy the recovery code', true))}>Copy code</button>
     </div>}
+  </section>
+}
+
+/** Owner switch: gates open to any device with the link, or only to approved POS machines. */
+function GateLockCard({ db, toast }: { db: DB; toast: (message: string, bad?: boolean) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+  const locked = Boolean(db.gateLock)
+  const set = async (value: boolean) => {
+    setBusy(true)
+    try { await callParking('setGateLock', [value]); toast(value ? 'Gates locked to approved POS machines' : 'Gates open to any device'); setConfirm(false) }
+    catch (failure) { toast((failure as Error).message, true) } finally { setBusy(false) }
+  }
+  return <section className="card stack gate-lock">
+    <div className="bill-head"><h2><Ico n="key" /> Gate lock</h2><Pill tone={locked ? 'ok' : 'warn'}>{locked ? 'On · approved POS only' : 'Off · open to anyone with the link'}</Pill></div>
+    <p className="muted small">{locked
+      ? 'Only the POS machines listed below can use Entry and Exit. A new POS must scan its setup QR first.'
+      : 'Any phone that opens the website can use Entry and Exit. Add your POS machines below and set each one up, then turn the lock on.'}</p>
+    {!confirm
+      ? <button className={'btn ' + (locked ? 'btn-ghost' : 'btn-primary')} disabled={busy} onClick={() => locked ? void set(false) : setConfirm(true)}>{locked ? 'Turn lock off' : 'Turn lock on'}</button>
+      : <div className="banner banner-warn"><div className="stack">
+        <p>Any POS that has <b>not</b> scanned its setup QR will stop working at the gate until it does. Make sure every POS is set up (shown as Active below).</p>
+        <div className="row2"><button className="btn btn-ghost" disabled={busy} onClick={() => setConfirm(false)}>Not yet</button><button className="btn btn-primary" disabled={busy} onClick={() => void set(true)}>{busy ? 'Locking…' : 'Lock gates'}</button></div>
+      </div></div>}
   </section>
 }

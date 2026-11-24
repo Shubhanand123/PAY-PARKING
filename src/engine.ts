@@ -83,6 +83,7 @@ export type DB = {
   freeVehicles?: FreeVehicle[]
   offlineIssues?: { at: number; opId: string; ticketId: string; device?: string; text: string; resolved?: boolean }[]  // offline work the Owner should check
   offlineSeen?: string[]   // op ids already recorded (latest 3000)
+  gateLock?: boolean       // Owner: gates work only on approved POS machines
 }
 
 const KEY = 'parking-demo-v1'

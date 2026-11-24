@@ -70,8 +70,9 @@ export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment
 type ParkingResponse = { snapshot?: Snapshot }
 
 async function requestParking<T extends ParkingResponse>(body: unknown, setupKey?: string, subroute?: PaymentEndpoint): Promise<T> {
-  const session = openAccess || setupKey !== undefined ? null : (await auth?.auth.getSession())?.data.session
-  const key = openAccess ? '' : setupKey ?? (session ? '' : deviceKey())
+  // Owner signed in: send the Owner's session. Otherwise an approved POS sends its device key; open gates send nothing.
+  const session = setupKey !== undefined ? null : (await auth?.auth.getSession())?.data.session
+  const key = setupKey ?? (session ? '' : deviceKey())
   const endpoint = import.meta.env.VITE_PARKING_API.replace(/\/$/, '')
   const response = await fetch(endpoint + (subroute ? '/' + subroute : ''), {
     method: 'POST',

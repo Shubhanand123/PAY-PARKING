@@ -6,6 +6,7 @@ import { fmtTime, type DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
 import { useDB, useNow, Ico, Toast } from './ui'
 import { Entry, Exit, Customer } from './Gate'
+import { PlateScanner } from './PlateScanner'
 import { Owner } from './Owner'
 
 type View = 'entry' | 'exit' | 'owner'
@@ -51,19 +52,28 @@ function OpenApp() {
     const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => setSessionId(session?.user.id ?? null))
     return () => subscription.unsubscribe()
   }, [])
+  const [setupNeeded, setSetupNeeded] = useState(false)
   useEffect(() => {
     let active = true
+    if (isPosLink(r)) {
+      // Setup link or QR from the Owner dashboard: approve this POS, then open the gates.
+      void openDirectPos(r).then(() => { if (active) { setSetupNeeded(false); setError(''); location.replace('#/entry') } })
+        .catch((failure: Error) => { if (active) { setError(failure.message); location.replace('#/entry') } })
+      return () => { active = false }
+    }
     const refresh = async () => {
       try {
         if (r.startsWith('t/')) {
           const response = await callParking('customer', [r.slice(2)], '')
           if (active) setCustomer(response.db)
         } else { await syncOutbox(); await callParking('snapshot') }
-        if (active) setError('')
+        if (active) { setError(''); setSetupNeeded(false) }
       } catch (failure) {
         if (!active) return
         // An expired or replaced Owner session: drop it and fall back to the open gate view.
         if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await auth?.auth.signOut({ scope: 'local' })
+        if (failure instanceof ParkingApiError && failure.status === 403 && /not set up/i.test(failure.message)) { setSetupNeeded(true); setSnapshot(undefined) }
+        if (failure instanceof ParkingApiError && failure.status === 401 && deviceKey()) { setDeviceKey(''); setSetupNeeded(true) } // POS removed in the dashboard
         setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
       }
     }
@@ -93,8 +103,10 @@ function OpenApp() {
     if (sessionId === undefined || (sessionId && !error)) return <main className="screen"><div className="content"><p role="status">Checking Owner sign-in…</p></div></main>
     return <Login onOwnerSetup={activateOwner} error={sessionId ? error : ''} />
   }
+  if (isPosLink(r)) return <main className="screen"><div className="content"><p role="status">Setting up this POS…</p></div></main>
+  if (setupNeeded && r !== 'owner') return <PosSetup error={error} />
   if (!snapshot) return <main className="screen"><div className="content"><p role={error ? 'alert' : 'status'}>{error === 'offline' ? 'No internet. Connect this POS once to load the parking records; after that it also works offline.' : error || 'Connecting to parking records…'}</p></div></main>
-  return <><ParkingApp db={snapshot.db} signOut={owner ? signOut : undefined} offline={error === 'offline'} />{error && error !== 'offline' && <div className="content"><p role="alert">{error}</p></div>}</>
+  return <><ParkingApp db={snapshot.db} role={snapshot.role === 'open' || snapshot.role === 'owner' ? undefined : snapshot.role} signOut={owner ? signOut : undefined} offline={error === 'offline'} />{error && error !== 'offline' && <div className="content"><p role="alert">{error}</p></div>}</>
 }
 
 function LocalApp() {
@@ -231,14 +243,14 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
       {gate ? <GateHeader view={view} routes={routes} flow={flow} offline={offline} /> : <header className="hero">
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
-          <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
+          <div className="brand"><span className="brand-logo"><img src="skc.png" alt="SKC" /></span>PARKAR</div>
           {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
           {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
         </nav>}
-        <h1>Dashboard</h1>
-        <p>{me.name} · {db.settings.siteName}</p>
+        <h1>Owner dashboard</h1>
+        <p>{db.settings.operator} · {db.settings.siteName}</p>
       </header>}
       <main className="content">
         {view === 'entry' && <Entry db={db} me={me} toast={say} onFlow={setFlow} />}
@@ -279,4 +291,30 @@ function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[
       </nav>}
     </header>
   )
+}
+
+/** A POS that the Owner has not approved yet: scan the setup QR from the dashboard (Devices). */
+function PosSetup({ error }: { error: string }) {
+  const [scan, setScan] = useState(false)
+  const [link, setLink] = useState('')
+  const [msg, setMsg] = useState('')
+  const use = (value: string) => {
+    const m = /#\/((?:pos|pair-pos)\/[a-f0-9]{64})/i.exec(value.trim()) ?? /^((?:pos|pair-pos)\/[a-f0-9]{64})$/i.exec(value.trim())
+    if (!m) { setMsg('That is not a PARKAR POS setup code. Use the QR from Owner dashboard → Devices.'); return false }
+    location.hash = '/' + m[1]
+    return true
+  }
+  return <div className="screen">
+    <header className="gh gh-entry"><div className="gh-row"><span className="gh-mark"><img src="skc.png" alt="SKC" /></span><b className="gh-name">PARKAR</b></div></header>
+    <main className="content"><section className="card stack pos-setup">
+      <h2>Set up this POS</h2>
+      <p className="muted small">The gates are locked to approved POS machines. On your phone, open the Owner dashboard → <b>POS devices</b>, add this POS, then scan its setup QR here.</p>
+      <button className="btn btn-primary btn-xl" onClick={() => setScan(true)}><Ico n="qr" size={24} /> Scan setup QR</button>
+      {scan && <PlateScanner onClose={() => setScan(false)} onRead={() => setMsg('That was a number plate. Point the camera at the setup QR.')} onQr={value => { const ok = use(value); if (ok) setScan(false); return ok }} />}
+      <label className="lbl" htmlFor="pos-link">Or paste the setup link</label>
+      <input id="pos-link" className="field small-field" value={link} onChange={e => setLink(e.target.value)} placeholder="https://…#/pos/…" autoComplete="off" />
+      <button className="btn btn-ghost" disabled={!link.trim()} onClick={() => use(link)}>Use this link</button>
+      {(msg || (error && !/not set up/i.test(error))) && <p className="msg bad" role="alert">{msg || error}</p>}
+    </section></main>
+  </div>
 }
