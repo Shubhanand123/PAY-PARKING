@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Pay Parking</string>
-    <string name="title_activity_main">Pay Parking</string>
+    <string name="app_name">PARKAR</string>
+    <string name="title_activity_main">PARKAR</string>
     <string name="package_name">com.saiexpress.payparking</string>
     <string name="custom_url_scheme">com.saiexpress.payparking</string>
 </resources>

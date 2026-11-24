@@ -101,7 +101,7 @@ public class PlateReaderPlugin extends Plugin {
      *  on a 58 mm roll. Which printer is used depends on the print services installed on the POS. */
     @PluginMethod
     public void print(PluginCall call) {
-        String name = call.getString("name", "Pay Parking");
+        String name = call.getString("name", "PARKAR");
         getActivity().runOnUiThread(() -> {
             try {
                 PrintManager manager = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);

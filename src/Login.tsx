@@ -112,7 +112,7 @@ export function Login({ onOwnerSetup, error }: {
     <header className="hero">
       <span className="glow g1" aria-hidden="true" /><span className="glow g2" aria-hidden="true" />
       <div className="hero-row">
-        <span className="brand"><span className="brand-mark" aria-hidden="true"><Ico n="p" /></span>Pay Parking</span>
+        <span className="brand"><span className="brand-mark" aria-hidden="true"><Ico n="p" /></span>PARKAR</span>
         <button className="chip-btn login-lang" type="button" onClick={() => setLanguage(language === 'en' ? 'hi' : 'en')} aria-label={language === 'en' ? 'Switch to Hindi' : 'Switch to English'}>{language === 'en' ? 'हिन्दी' : 'English'}</button>
       </div>
       <h1>{t.owner}</h1>

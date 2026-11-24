@@ -190,7 +190,7 @@ function ConnectedApp() {
   }
   if (r === 'owner') return <Login onOwnerSetup={activateOwner} error={error} />
   return <div className="screen">
-    <header className="hero compact"><div className="hero-row"><span className="brand"><span className="brand-mark"><Ico n="p" /></span>Pay Parking</span></div><h1>Gate POS</h1></header>
+    <header className="hero compact"><div className="hero-row"><span className="brand"><span className="brand-mark"><Ico n="p" /></span>PARKAR</span></div><h1>Gate POS</h1></header>
     <main className="content"><section className="card stack">
       <p>{error || 'Open your direct POS link on this machine to start.'}</p>
       <a className="link" href="#/owner">Owner dashboard</a>
