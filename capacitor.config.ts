@@ -6,7 +6,8 @@ const config: CapacitorConfig = {
   appId: 'com.saiexpress.payparking',
   appName: 'Pay Parking',
   webDir: 'dist',
-  server: {
+  // CAP_BUNDLED=1 builds a test APK that carries this branch's site instead of loading the live one.
+  server: process.env.CAP_BUNDLED ? { androidScheme: 'https' } : {
     url: 'https://pay-parking-ekb.pages.dev',
     androidScheme: 'https',
   },
