@@ -2,9 +2,9 @@ import { auth } from './parking-auth'
 import { Login } from './Login'
 import { apiEnabled, callParking, deviceKey, openAccess, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
 import { nativeApp } from './native'
-import type { DB } from './engine'
+import { fmtTime, type DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
-import { useDB, Ico, Toast } from './ui'
+import { useDB, useNow, Ico, Toast } from './ui'
 import { Entry, Exit, Customer } from './Gate'
 import { Owner } from './Owner'
 
@@ -202,6 +202,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
   const role = given === 'open' ? undefined : given
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
+  const [flow, setFlow] = useState(false) // slip, QR or receipt on screen: hide the Entry/Exit switch
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
   const say = useCallback((m: string, bad?: boolean) => setToast({ m, bad }), [])
   const done = useCallback(() => setToast(null), [])
@@ -219,26 +220,55 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
   const routes: View[] = role === 'both' || nativeApp ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
   const me = db.staff.find(s => s.id === (view === 'entry' ? 'ravi' : view === 'exit' ? 'sunil' : 'owner'))!
   const wide = view === 'owner'
+  const gate = view !== 'owner'
   return (
     <div className={wide ? 'screen wide' : 'screen'}>
-      <header className={view === 'owner' ? 'hero' : 'hero compact'}>
+      {gate ? <GateHeader view={view} routes={routes} flow={flow} /> : <header className="hero">
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
-          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
+          {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
           {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
         </nav>}
-        <h1>{view === 'entry' ? 'Vehicle in' : view === 'exit' ? 'Vehicle out' : 'Dashboard'}</h1>
+        <h1>Dashboard</h1>
         <p>{me.name} · {db.settings.siteName}</p>
-      </header>
+      </header>}
       <main className="content">
-        {view === 'entry' && <Entry db={db} me={me} toast={say} />}
-        {view === 'exit' && <Exit db={db} me={me} toast={say} />}
+        {view === 'entry' && <Entry db={db} me={me} toast={say} onFlow={setFlow} />}
+        {view === 'exit' && <Exit db={db} me={me} toast={say} onFlow={setFlow} />}
         {view === 'owner' && <Owner db={db} me={me} toast={say} />}
       </main>
       {toast && <Toast msg={toast.m} tone={toast.bad ? 'bad' : 'ok'} onDone={done} />}
     </div>
+  )
+}
+
+/** H2 header for the gates: colour-coded Entry (blue) / Exit (orange) switch, clock and connection light.
+ *  While a slip, a payment QR or a receipt is on screen the switch is replaced by a gate badge. */
+function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: boolean }) {
+  const now = useNow(15000)
+  const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const on = () => setOnline(true), off = () => setOnline(false)
+    addEventListener('online', on); addEventListener('offline', off)
+    return () => { removeEventListener('online', on); removeEventListener('offline', off) }
+  }, [])
+  const tabs = routes.filter(v => v !== 'owner')
+  return (
+    <header className={'gh gh-' + view}>
+      <div className="gh-row">
+        <span className="gh-mark"><Ico n="p" size={22} /></span>
+        <b className="gh-name">PARKAR</b>
+        {(flow || tabs.length < 2) && <span className={'gh-gate ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={15} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}</span>}
+        <span className="gh-time num">{fmtTime(now)}</span>
+        <span className={'gh-net' + (online ? '' : ' off')}><i />{online ? 'Online' : 'Offline'}</span>
+      </div>
+      {!flow && tabs.length > 1 && <nav className="gh-tabs" aria-label="Choose gate">
+        {tabs.map(v => <a key={v} href={'#/' + v} className={'gh-tab ' + v + (view === v ? ' on' : '')} aria-current={view === v}>
+          <Ico n={v === 'entry' ? 'scan' : 'out'} size={18} />{v === 'entry' ? 'Entry' : 'Exit'}</a>)}
+      </nav>}
+    </header>
   )
 }

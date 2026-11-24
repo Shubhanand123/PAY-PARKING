@@ -1,4 +1,5 @@
 import { RazorpayCheckout } from './RazorpayCheckout'
+import { PosPay } from './PosPay'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
@@ -18,7 +19,10 @@ import { alreadyInside, ticketCancelled } from './fx'
 
 // ---------- 58 mm parking slip ----------
 /** The exit receipt exactly as it was saved when the bill was paid. */
-function ReceiptCopy({ r, t }: { r: Receipt; t: Ticket }) {
+function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
+  const tv = db.tariffs.find(x => x.id === t.tariffId)
+  const rt = tv?.rates[t.category]
+  const rates = tv && rt ? { v: tv.version, text: `${rupees(rt.firstPaise)} first ${rt.firstHours}h, ${rupees(rt.perHourPaise)} per started hour, ${tv.graceMin} min free, max ${rupees(rt.capPaise)} / 24h` } : null
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
@@ -29,7 +33,7 @@ function ReceiptCopy({ r, t }: { r: Receipt; t: Ticket }) {
       <div className="slip-big">{r.free ? 'RECEIPT · FREE' : 'RECEIPT'}</div>
       <div className="slip-row"><span>Receipt</span><b>{r.receiptNo}</b></div>
       <div className="slip-row"><span>Ticket</span><b>{r.ticketId}</b></div>
-      <div className="slip-plate">{prettyPlate(r.plate)}</div>
+      <div className="slip-plate"><i>IND</i>{prettyPlate(r.plate)}</div>
       <div className="slip-row"><span>Vehicle</span><b>{r.vehicle}</b></div>
       <div className="slip-row"><span>Entry</span><b>{fmtDT(r.entryAt)}</b></div>
       <div className="slip-row"><span>Billed</span><b>{fmtDT(r.billedAt)}</b></div>
@@ -37,16 +41,15 @@ function ReceiptCopy({ r, t }: { r: Receipt; t: Ticket }) {
       <hr />
       {r.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
       <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(r.totalPaise)}</b></div>
-      {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid online (Razorpay)' : 'Cash paid'}</span><b>{rupees(p.amountPaise)}</b></div>)}
+      {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid by UPI (Razorpay)' : 'Cash paid'}</span><b>{rupees(p.amountPaise)}</b></div>)}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
-      <div className="slip-qr"><QR text={ticketUrl(t.token)} size={110} /></div>
-      <div className="slip-s">Thank you · Issued by {r.issuedBy}</div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{rates ? `Rates v${rates.v}: ${rates.text}. ` : ''}Thank you · Issued by {r.issuedBy}</span></div>
     </div>
   )
 }
 
 export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean }) {
-  if (receipt && t.receipt) return <ReceiptCopy r={t.receipt} t={t} />
+  if (receipt && t.receipt) return <ReceiptCopy db={db} r={t.receipt} t={t} />
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const r = tv.rates[t.category]
   const cat = db.categories.find(c => c.id === t.category)
@@ -62,7 +65,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
       <div className="slip-big">{receipt ? 'RECEIPT' : 'PARKING SLIP'}</div>
       <div className="slip-row"><span>Ticket</span><b>{t.id}</b></div>
       {receipt && pays.length > 0 && <div className="slip-row"><span>Receipt</span><b>{pays[pays.length - 1].receiptNo}</b></div>}
-      <div className="slip-plate">{prettyPlate(t.plate)}</div>
+      <div className="slip-plate"><i>IND</i>{prettyPlate(t.plate)}</div>
       <div className="slip-row"><span>Vehicle</span><b>{cat?.name}</b></div>
       <div className="slip-row"><span>Entry</span><b>{fmtDT(t.entryAt)}</b></div>
       <div className="slip-row"><span>Gate</span><b>{t.entryGate}</b></div>
@@ -85,14 +88,13 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
           {' '}Final amount is worked out at exit.
         </div>
       </>}
-      <div className="slip-qr"><QR text={ticketUrl(t.token)} size={120} /></div>
-      <div className="slip-s">Scan to see your ticket, time and amount</div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see your ticket, time and amount. Keep this slip for the exit.</span></div>
     </div>
   )
 }
 
 // ---------- entry ----------
-export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
+export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: boolean) => void }) {
   useEffect(() => { if (!nativeApp) void warmPlateReader().catch(() => {}) }, [])
   const [plate, setPlate] = useState('')
   const [conf, setConf] = useState<number | null>(null)
@@ -112,6 +114,8 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   const prepaid = db.settings.payAtEntry && paymentTiming === 'before' && !already
   const rate = tv.rates[cat]
   const advance = prepaid && rate ? prepaidPrice(hours, rate) : 0
+  useEffect(() => { onFlow?.(Boolean(done)) }, [done, onFlow])
+  useEffect(() => () => onFlow?.(false), [onFlow])
 
   const confirm = async () => {
     if (busy) return // one tap only
@@ -138,16 +142,14 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
   if (done) {
     const t = db.tickets.find(x => x.id === done.t.id) ?? done.t
     return (
-      <div className="stack">
-        {done.dup
-          ? <div className="banner banner-warn"><Ico n="warn" /> <div><b>Already inside.</b> {prettyPlate(t.plate)} came in at {fmtTime(t.entryAt)}. No new ticket was made. You can reprint this one.</div></div>
-          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'The print was not logged. Tap Reprint slip to try again.' : t.prints > 0 ? 'Slip printed. Hand it to the customer.' : 'Printing the slip…'}</div></div>}
-        <Slip db={db} t={t} />
-        <div className="row2">
-          <button className="btn btn-ghost" onClick={() => void printSlip().then(() => print(t))}><Ico n="print" /> {done.dup && t.prints === 0 ? 'Print slip' : 'Reprint slip'}</button>
-          <button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" /> Next vehicle</button>
+      <div className="stack paper-screen">
+        {done.dup && <div className="banner banner-warn"><Ico n="warn" /> <div><b>Already inside.</b> {prettyPlate(t.plate)} came in at {fmtTime(t.entryAt)}. No new ticket was made. You can reprint this one.</div></div>}
+        {printFail && <p className="msg bad" role="alert">The print was not logged. Tap Reprint to try again.</p>}
+        <div className="paper-full"><Slip db={db} t={t} /></div>
+        <div className="actionbar duo">
+          <button className="btn btn-ghost btn-xl" onClick={() => void printSlip().then(() => print(t))}><Ico n="print" size={22} /> {done.dup && t.prints === 0 ? 'Print' : 'Reprint'}</button>
+          <button className="btn btn-primary btn-xl" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" size={22} /> Next vehicle</button>
         </div>
-
       </div>
     )
   }
@@ -162,7 +164,6 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
           setConf(result.confidence)
           setAlternatives(result.alternatives)
         }} />}
-        <p className="tiny muted center">Point the live camera at the plate or type the number.</p>
         <label className="lbl" htmlFor="plate">Vehicle number</label>
         <input id="plate" ref={inp} className="field plate-field" value={plate} autoFocus inputMode="text" autoCapitalize="characters" autoComplete="off"
           placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
@@ -214,7 +215,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 }
 
 // ---------- exit ----------
-export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
+export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: boolean) => void }) {
   useEffect(() => {
     if (!nativeApp) void warmPlateReader().catch(() => {})
     void import('jsqr').catch(() => {})
@@ -230,8 +231,16 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
   const [reason, setReason] = useState('')
   const [rev, setRev] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [menu, setMenu] = useState(false)
   const now = useNow(10000)
   const t = id ? db.tickets.find(x => x.id === id) : undefined
+  // An open UPI QR on this ticket: go straight to the pay screen.
+  useEffect(() => { if (t?.onlineCheckout && t.status === 'inside') setPaying(true) }, [t?.id, t?.onlineCheckout?.orderId, t?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  // H2 header: the Entry/Exit switch shows only on the lookup and the bill, not on the QR or the receipt.
+  const flow = Boolean(t && (paying || t.status === 'paid' || t.status === 'exited'))
+  useEffect(() => { onFlow?.(flow) }, [flow, onFlow])
+  useEffect(() => () => onFlow?.(false), [onFlow])
   const active = db.tickets.filter(x => x.status === 'inside' || x.status === 'paid')
   const nq = normPlate(q)
   const filtered = nq.length >= 2 ? active.filter(x => x.plate.includes(nq) || x.id.replace('-', '').includes(nq)) : active
@@ -270,7 +279,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     autoPrinted.current = paidNow.id
     void printReceipt(paidNow)
   })
-  const reset = () => { setId(null); setQ(''); setScannedPlate(false); setPlateAlternatives([]); setPick(null); setCancelling(false); setReason('') }
+  const reset = () => { setId(null); setPaying(false); setMenu(false); setQ(''); setScannedPlate(false); setPlateAlternatives([]); setPick(null); setCancelling(false); setReason('') }
 
   // The POS's built-in barcode scanner types the ticket QR like a keyboard and presses Enter.
   const wedge = useRef({ find, reset, toast, ticket: t })
@@ -297,6 +306,8 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
   if (t) {
     const b = billFor(db, t, now)
     const cat = db.categories.find(c => c.id === t.category)
+    const tv = db.tariffs.find(x => x.id === t.tariffId)!
+    const rate = tv.rates[t.category]
     const stale = t.rev !== rev && !(t.onlineCheckout && t.status === 'paid')
     const act = async (label: string, fn: () => Promise<void>) => {
       if (busy) return
@@ -306,48 +317,94 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
       catch (error) { if (label) saveEnd(false, ''); toast((error as Error).message, true) }
       finally { setBusy(false) }
     }
-    return (
-      <div className="stack">
-        <button className="link left" onClick={reset}><Ico n="back" size={18} /> New lookup</button>
-        <div className="card tk">
-          <div className="tk-head">
-            <span className="veh-tile"><Ico n={cat?.icon ?? 'car'} size={42} /></span>
-            <div className="tk-id"><div className="plate-big">{prettyPlate(t.plate)}</div><div className="tk-sub"><span className="muted small">{cat?.name} · {t.id}</span><StatusPill t={t} /></div></div>
-          </div>
-          {confirmLost && t.status === 'inside' && <div className="banner banner-info"><Ico n="search" /><div><b>Found by plate.</b> Check the vehicle type and entry time match before collecting.</div></div>}
-          <TimeStrip from={t.entryAt} to={t.exitAt ?? now} live={!t.exitAt} />
-          <div className="tk-meta muted small"><span>{t.entryGate} · {t.entryBy}</span><span>Rates v{db.tariffs.find(x => x.id === t.tariffId)?.version} (at entry)</span></div>
+    const staleBanner = stale && t.status !== 'cancelled' && <div className="banner banner-warn"><Ico n="warn" /><div>This ticket was changed on another device. <button className="link" onClick={() => setRev(t.rev)}>Reload</button></div></div>
+    const cancelCard = cancelling && <div className="card">
+      <label className="lbl" htmlFor="rsn">Reason {db.settings.cancelNeedsReason ? '(required)' : '(optional)'}</label>
+      <input id="rsn" className="field small-field" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong vehicle type" />
+      <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', async () => { await cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
+    </div>
+
+    // Q9: pay by UPI QR. Stays on screen until the "received" moment has played, then the receipt opens.
+    if (paying && (t.status === 'inside' || t.status === 'paid')) return (
+      <PosPay t={t} amount={t.status === 'inside' ? b.duePaise : (t.totalPaise ?? b.totalPaise) - b.prepaidPaise} vehicle={cat?.name ?? ''} paid={t.status === 'paid'}
+        onRevision={setRev} onDone={() => setPaying(false)} onCash={() => setPaying(false)} />
+    )
+
+    // Receipt: full screen, green light from the bottom while the vehicle is paid but still here.
+    if (t.status === 'paid' || t.status === 'exited') return (
+      <div className={'stack paper-screen' + (t.status === 'paid' ? ' lit' : '')}>
+        {t.status === 'paid' && <><span className="paid-glow" aria-hidden="true" /><span className="paid-flash" aria-hidden="true" /></>}
+        {t.status === 'exited' && <div className="banner banner-ok"><Ico n="check" /><div><b>Closed.</b> Left at {fmtTime(t.exitAt!)} by {t.exitGate}.</div></div>}
+        <div className="paper-full"><Slip db={db} t={t} receipt /></div>
+        {staleBanner}
+        {cancelCard}
+        <div className="actionbar duo">
+          <button className="btn btn-ghost btn-xl" onClick={() => void printReceipt(t)}><Ico n="print" size={22} /> Reprint</button>
+          {t.status === 'paid'
+            ? <button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('', async () => { const r = await recordExit(me.id, t.id); setRev(r.rev) })}><Ico n="out" size={22} /> Vehicle left</button>
+            : <button className="btn btn-primary btn-xl" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" size={22} /> Next vehicle</button>}
         </div>
-        {(t.status === 'inside') && <div className="card bill">
-          <div className="bill-head"><h2>Bill</h2><span className="muted small">as of {fmtTime(now)}</span></div>
-          <div className="bill-lines">
-            {b.lines.map((l, i) => <div key={i} className={'line' + (l.paise < 0 ? ' minus' : '')}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
+        {t.status === 'paid' && !t.onlineCheckout && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
+      </div>
+    )
+
+    if (t.status === 'cancelled') return (
+      <div className="stack">
+        <div className="banner banner-bad"><Ico n="x" /><div><b>Cancelled</b> by {t.cancelledBy} at {fmtTime(t.cancelledAt!)}{t.cancelReason ? `: ${t.cancelReason}` : ''}.</div></div>
+        <button className="btn btn-primary" onClick={reset}><Ico n="back" /> New lookup</button>
+      </div>
+    )
+
+    // Exit bill: everything on one screen.
+    const why = (label: string) =>
+      label.startsWith('First') ? `${cat?.name} · rates v${tv.version}, fixed at entry`
+        : label.includes('extra hour') ? `Every started hour after ${rate.firstHours}h`
+          : label.includes('grace') ? `Left within ${tv.graceMin} minutes`
+            : label.includes('full day') ? 'Each full day is charged at the 24-hour maximum'
+              : label.startsWith('Daily cap') ? `Never more than ${rupees(rate.capPaise)} per 24 hours`
+                : label.startsWith('Free vehicle') ? 'On the owner\'s free list'
+                  : label === 'Paid at entry' ? 'Paid when the vehicle came in'
+                    : label.startsWith('Minimum') ? 'The prepaid block is the minimum charge' : ''
+    const upi = db.razorpayEnabled && b.duePaise >= 100
+    return (
+      <div className="stack exit-bill">
+        <div className="card tk2">
+          <div className="tk2-head">
+            <button className="icon-btn" onClick={reset} aria-label="New lookup"><Ico n="back" /></button>
+            <span className="veh-tile sm"><Ico n={cat?.icon ?? 'car'} size={30} /></span>
+            <div className="tk-id">
+              <span className="ind-plate"><i />{prettyPlate(t.plate)}</span>
+              <div className="tk-sub"><span className="muted small">{cat?.name} · {t.id}</span><StatusPill t={t} />{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
+            </div>
+            {!t.onlineCheckout && <button className="icon-btn more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>}
           </div>
-          {b.duePaise > 0
-            ? <div className="due-band"><span>To collect</span><b className="num">{rupees(b.duePaise)}</b></div>
-            : <div className="due-band zero"><Ico n="check" size={22} /><span>Nothing due</span><b className="num">₹0</b></div>}
-          <p className="tiny muted">{t.onlineCheckout ? 'The amount is locked for the online order. The customer can pay from their ticket QR.' : 'The amount is checked again before payment.'}</p>
-        </div>}
-        {stale && t.status !== 'cancelled' && <div className="banner banner-warn"><Ico n="warn" /><div>This ticket was changed on another device. <button className="link" onClick={() => setRev(t.rev)}>Reload</button></div></div>}
-        {t.status === 'inside' && db.razorpayEnabled && b.duePaise >= 100 && (!stale || t.onlineCheckout) &&
-          <RazorpayCheckout key={t.id} ticketId={t.id} token={t.token} amount={b.duePaise} name={db.settings.operator} hasOrder={Boolean(t.onlineCheckout)} linkUrl={t.onlineCheckout?.linkUrl} upiQr={t.onlineCheckout?.upiQr} qrImage={t.onlineCheckout?.qrImage} test={db.razorpayTest} pos onRevision={setRev} />}
-        {t.status === 'inside' && !stale && !t.onlineCheckout && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
-          {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> {b.free ? `Free vehicle (${b.free.reason}) · Continue` : 'Nothing due · Continue'}</>}
-        </button></div>}
-        {t.status === 'paid' && <>
-          <div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>{t.free ? `Free · ${t.free.reason}` : t.totalPaise ? `Paid ${rupees(t.totalPaise)}` : 'Nothing due'}</b><span>{t.receiptPrints ? 'Receipt printed. Hand it over, let the vehicle out, then tap below.' : 'Printing the receipt…'}</span></div></div>
-          <Slip db={db} t={t} receipt />
-          <button className="btn btn-ghost" onClick={() => void printReceipt(t)}><Ico n="print" /> Reprint receipt</button>
-          <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('', async () => { const r = await recordExit(me.id, t.id); setRev(r.rev) })}><Ico n="out" size={24} /> Vehicle left · Close ticket</button></div>
-        </>}
-        {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {t.free ? `Free (${t.free.reason})` : rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-ghost" onClick={() => void printReceipt(t)}><Ico n="print" /> Reprint receipt</button><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Next vehicle</button></>}
-        {t.status === 'cancelled' && <div className="banner banner-bad"><Ico n="x" /><div><b>Cancelled</b> by {t.cancelledBy} at {fmtTime(t.cancelledAt!)}{t.cancelReason ? `: ${t.cancelReason}` : ''}.</div></div>}
-        {(t.status === 'inside' || t.status === 'paid') && !t.onlineCheckout && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
-        {cancelling && <div className="card">
-          <label className="lbl" htmlFor="rsn">Reason {db.settings.cancelNeedsReason ? '(required)' : '(optional)'}</label>
-          <input id="rsn" className="field small-field" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong vehicle type" />
-          <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', async () => { await cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
-        </div>}
+          {menu && <div className="tk2-menu"><button className="link danger" onClick={() => { setMenu(false); setCancelling(true) }}><Ico n="x" size={16} /> Cancel this ticket</button></div>}
+          <SlabBar from={t.entryAt} to={now} firstHours={rate.firstHours} firstPaise={rate.firstPaise} perHourPaise={rate.perHourPaise} />
+        </div>
+        <div className="card bill2">
+          {b.lines.map((l, i) => <div key={i} className={'bl' + (l.paise < 0 ? ' minus' : '')}>
+            <div><span>{l.label}</span>{why(l.label) && <small>{why(l.label)}</small>}</div>
+            <b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b>
+          </div>)}
+          <div className="rule-chips">
+            <span>{tv.graceMin} min free</span><span>Max {rupees(rate.capPaise)} / 24h</span>
+            <span>{t.onlineCheckout ? 'Amount locked for the UPI QR' : 'Checked again before payment'}</span>
+          </div>
+        </div>
+        <div className={'due-navy' + (b.duePaise ? '' : ' zero')}>
+          <div><b>{b.duePaise ? 'To collect' : b.free ? `Free · ${b.free.reason}` : 'Nothing due'}</b><small>Gate: Exit · as of {fmtTime(now)}</small></div>
+          <b className="num">{rupees(b.duePaise)}</b>
+        </div>
+        {staleBanner}
+        {cancelCard}
+        {!stale && (b.duePaise
+          ? <div className="actionbar duo">
+            {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>UPI</b><small>Razorpay QR</small></span></button>}
+            <button className="btn btn-xl pay-btn cash" disabled={busy || Boolean(t.onlineCheckout)} onClick={() => act('', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
+              <Ico n="cash" size={24} /><span><b>Cash</b><small>received {rupees(b.duePaise)}</small></span></button>
+          </div>
+          : <div className="actionbar"><button className="btn btn-xl btn-success" disabled={busy} onClick={() => act('Done', async () => { const r = await takeCash(me.id, t.id, rev, 0); setRev(r.rev) })}>
+            <Ico n="check" size={24} /> {b.free ? `Free vehicle (${b.free.reason}) · Continue` : 'Nothing due · Continue'}</button></div>)}
       </div>
     )
   }
@@ -456,6 +513,25 @@ export function TimeStrip({ from, to, live }: { from: number; to: number; live: 
       <div className="ts-end"><span className="ts-l">In</span><b className="num">{fmtTime(from)}</b><span className="ts-d">{fmtDate(from)}</span></div>
       <div className="ts-mid"><span className="ts-dur num">{dur(to - from)}</span><i className={live ? 'live' : ''} /></div>
       <div className="ts-end r"><span className="ts-l">{live ? 'Now' : 'Out'}</span><b className="num">{fmtTime(to)}</b><span className="ts-d">{fmtDate(to)}</span></div>
+    </div>
+  )
+}
+
+/** Exit bill time bar: in → now, with the first slab and the extra hours marked. */
+function SlabBar({ from, to, firstHours, firstPaise, perHourPaise }: { from: number; to: number; firstHours: number; firstPaise: number; perHourPaise: number }) {
+  const minutes = Math.max(0, (to - from) / 60000)
+  const extra = Math.max(0, Math.ceil(minutes / 60) - firstHours)
+  const span = Math.max(minutes, firstHours * 60)
+  const first = Math.min(minutes, firstHours * 60) / span
+  return (
+    <div className="slab">
+      <div className="slab-top">
+        <div><small>In · {fmtDate(from)}</small><b className="num">{fmtTime(from)}</b></div>
+        <span className="slab-dur num">{dur(to - from)}</span>
+        <div className="r"><small>Now</small><b className="num">{fmtTime(to)}</b></div>
+      </div>
+      <div className="slab-bar"><i className="a" style={{ width: first * 100 + '%' }} /><i className="b" style={{ width: (minutes / span - first) * 100 + '%' }} /></div>
+      <div className="slab-foot"><span>First {firstHours}h · {rupees(firstPaise)}</span>{extra > 0 && <span>+{extra} hour{extra > 1 ? 's' : ''} · {rupees(extra * perHourPaise)}</span>}</div>
     </div>
   )
 }

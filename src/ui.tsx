@@ -51,9 +51,9 @@ export function Ico({ n, size = 20, className }: { n: string; size?: number; cla
   return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: P[n] ?? '' }} />
 }
 
-export function QR({ text, size = 132 }: { text: string; size?: number }) {
+export function QR({ text, size = 132, level = 'M' }: { text: string; size?: number; level?: 'M' | 'H' }) {
   const [src, setSrc] = useState('')
-  useEffect(() => { QRCode.toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: 'M' }).then(setSrc) }, [text, size])
+  useEffect(() => { QRCode.toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: level }).then(setSrc) }, [text, size, level])
   return src ? <img src={src} width={size} height={size} alt="Ticket QR code" /> : <div style={{ width: size, height: size }} />
 }
 
