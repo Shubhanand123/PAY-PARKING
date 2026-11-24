@@ -74,9 +74,20 @@ export function createRazorpayQr(credentials: RazorpayCredentials, amount: numbe
   })
 }
 
+/** The QR's payment for the exact amount. A UPI payment is "authorized" (money received) a few seconds before
+ *  Razorpay captures it; we capture it ourselves straight away, so the gate does not wait for Razorpay. */
 export async function capturedQrPayment(credentials: RazorpayCredentials, qrId: string, amount: number) {
   const payments = await request<{ items: RazorpayPayment[] }>(credentials, 'payments/qr_codes/' + qrId + '/payments')
-  return payments.items.find(payment => payment.status === 'captured' && payment.amount === amount)
+  const captured = payments.items.find(payment => payment.status === 'captured' && payment.amount === amount)
+  if (captured) return captured
+  const authorized = payments.items.find(payment => payment.status === 'authorized' && payment.amount === amount)
+  if (!authorized) return undefined
+  try { return await request<RazorpayPayment>(credentials, 'payments/' + authorized.id + '/capture', { amount, currency: 'INR' }) }
+  catch {
+    // Captured by Razorpay in the meantime (or capture refused): read it again.
+    const again = await request<RazorpayPayment>(credentials, 'payments/' + authorized.id)
+    return again.status === 'captured' ? again : undefined
+  }
 }
 
 export async function closeRazorpayQr(credentials: RazorpayCredentials, qrId: string) {

@@ -1,5 +1,6 @@
 import { RazorpayCheckout } from './RazorpayCheckout'
 import { PosPay } from './PosPay'
+import { apiEnabled, callParkingPayment } from './parking-api'
 import { setBusy as markBusy } from './updater'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
@@ -246,7 +247,18 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
   const now = useNow(10000)
   const t = id ? db.tickets.find(x => x.id === id) : undefined
   // An open UPI QR on this ticket: go straight to the pay screen.
-  useEffect(() => { if (t?.onlineCheckout && t.status === 'inside') setPaying(true) }, [t?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Make the UPI QR in the background as soon as the bill opens, so it shows instantly when UPI is tapped.
+  // If the operator takes cash instead, that QR is closed first (see the Cash button).
+  const prefetched = useRef(new Set<string>())
+  useEffect(() => {
+    if (!t || t.status !== 'inside' || t.onlineCheckout || !apiEnabled || !db.razorpayEnabled || !navigator.onLine) return
+    const due = billFor(db, t, Date.now()).duePaise
+    if (due < 100 || prefetched.current.has(t.id)) return
+    prefetched.current.add(t.id)
+    void callParkingPayment<{ snapshot?: { db: DB } }>('create-order', { ticket_id: t.id, amount: due, currency: 'INR', receipt: t.id, upi_qr: true })
+      .then(r => { const fresh = r.snapshot?.db.tickets.find(x => x.id === t.id); if (fresh) setRev(fresh.rev) })
+      .catch(() => { prefetched.current.delete(t.id) })
+  }, [t?.id, t?.status]) // eslint-disable-line react-hooks/exhaustive-deps
   // H2 header: the Entry/Exit switch shows only on the lookup and the bill, not on the QR or the receipt.
   const flow = !t ? '' : paying ? 'Pay by UPI' : t.status === 'paid' || t.status === 'exited' ? 'Receipt' : ''
   useLayoutEffect(() => { onFlow?.(flow) }, [flow, onFlow])
@@ -332,7 +344,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
     const cancelCard = cancelling && <div className="card">
       <label className="lbl" htmlFor="rsn">Reason {db.settings.cancelNeedsReason ? '(required)' : '(optional)'}</label>
       <input id="rsn" className="field small-field" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong vehicle type" />
-      <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', async () => { await cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
+      <div className="row2"><button className="btn btn-ghost" onClick={() => setCancelling(false)}>Keep</button><button className="btn btn-danger" onClick={() => act('', async () => { if (t.onlineCheckout && t.status === 'inside') await callParkingPayment('switch-to-cash', { ticket_id: t.id }); await cancelTicket(me.id, t.id, reason); setCancelling(false); ticketCancelled(prettyPlate(t.plate), t.id, fmtTime(Date.now())) })}>Cancel ticket</button></div>
     </div>
 
     // Q9: pay by UPI QR. Stays on screen until the "received" moment has played, then the receipt opens.
@@ -383,7 +395,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
           <div className="tk2-head">
             <button className="icon-btn" onClick={reset} aria-label="Back to lookup"><Ico n="back" /></button>
             <span className="ind-plate"><i />{prettyPlate(t.plate)}</span>
-            {!t.onlineCheckout && <button className="icon-btn more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>}
+            {<button className="icon-btn more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>}
           </div>
           <div className="tk2-sub"><span className="veh-chip"><Ico n={cat?.icon ?? 'car'} size={20} />{cat?.name}</span><span className="muted small">{t.id}</span><StatusPill t={t} />{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
           {menu && <div className="tk2-menu"><button className="link danger" onClick={() => { setMenu(false); setCancelling(true) }}><Ico n="x" size={16} /> Cancel this ticket</button></div>}
@@ -396,7 +408,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
           </div>)}
           <div className="rule-chips">
             <span>{tv.graceMin} min free</span>{rate.capPaise > 0 && <span>Max {rupees(rate.capPaise)} / 24h</span>}<span>After {rate.firstHours}h: {rupees(rate.perHourPaise)} / hour</span>
-            <span>{t.onlineCheckout ? 'Amount locked for the UPI QR' : 'Checked again before payment'}</span>
+            <span>{t.onlineCheckout ? 'UPI QR ready · amount fixed' : 'Checked again before payment'}</span>
           </div>
         </div>
         <div className={'due-navy' + (b.duePaise ? '' : ' zero')}>
@@ -408,8 +420,17 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
         {!navigator.onLine && b.duePaise > 0 && <p className="offline-note">No internet: UPI is off. Take cash; it is saved on this POS and sent when the internet is back.</p>}
         {!stale && (b.duePaise
           ? <div className="actionbar duo">
-            {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>{t.onlineCheckout ? 'Show QR' : 'UPI'}</b><small>{t.onlineCheckout ? 'QR still open' : 'Razorpay QR'}</small></span></button>}
-            <button className="btn btn-xl pay-btn cash" disabled={busy || Boolean(t.onlineCheckout)} onClick={() => act('', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
+            {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>UPI</b><small>{t.onlineCheckout ? 'QR ready' : 'Razorpay QR'}</small></span></button>}
+            <button className="btn btn-xl pay-btn cash" disabled={busy} onClick={() => act('', async () => {
+              let r0 = rev, due = b.duePaise
+              if (t.onlineCheckout) {
+                // Close the ready UPI QR first (Razorpay confirms nothing was paid), then take cash for the bill as of now.
+                const closed = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id })
+                r0 = closed.revision
+                due = billFor(db, { ...t, onlineCheckout: undefined }, Date.now()).duePaise
+              }
+              const r = await takeCash(me.id, t.id, r0, due); setRev(r.rev); cashCelebrate(due, prettyPlate(t.plate))
+            })}>
               <Ico n="cash" size={24} /><span><b>Cash</b><small>received {rupees(b.duePaise)}</small></span></button>
           </div>
           : <div className="actionbar"><button className="btn btn-xl btn-success" disabled={busy} onClick={() => act('Done', async () => { const r = await takeCash(me.id, t.id, rev, 0); setRev(r.rev) })}>

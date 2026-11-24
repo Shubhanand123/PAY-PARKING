@@ -407,6 +407,26 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   return reply({ error: 'Could not update the ticket. Check payment again before collecting cash.' }, 409)
 }
 
+async function hmacHex(secret: string, message: string) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return hex(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message))))
+}
+
+async function razorpayWebhook(request: Request, raw: string, body: Record<string, unknown>) {
+  const secret = Deno.env.get('RAZORPAY_WEBHOOK_SECRET')
+  const signature = request.headers.get('X-Razorpay-Signature') ?? ''
+  if (!secret || !/^[a-f0-9]{64}$/.test(signature) || await hmacHex(secret, raw) !== signature) return reply({ error: 'Signature did not match.' }, 400)
+  const payload = (body?.payload ?? {}) as Record<string, { entity?: Record<string, unknown> }>
+  const qrId = (payload.qr_code?.entity?.id ?? (payload.payment?.entity?.notes as Record<string, unknown> | undefined)?.qr_code_id) as string | undefined
+  if (typeof qrId !== 'string' || !razorpayQrId.test(qrId)) return reply({ ok: true, ignored: true })
+  const { db } = await state()
+  const ticket = db.tickets.find(t => t.onlineCheckout?.orderId === qrId && t.status === 'inside')
+  if (!ticket) return reply({ ok: true, ignored: true })
+  // Same checks as the gate's own "check payment": confirm with Razorpay, capture, then mark the ticket Paid.
+  const result = await paymentRoute('check-payment', { ticket_token: ticket.token })
+  return reply({ ok: true, status: result.status })
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
   if (request.method !== 'POST') return reply({ error: 'Method not allowed.' }, 405)
@@ -415,6 +435,10 @@ Deno.serve(async request => {
     if (raw.length > 16000) return reply({ error: 'Request is too large.' }, 413)
     const body = JSON.parse(raw)
     const subroute = new URL(request.url).pathname.split('/').at(-1)
+    // Keep-awake ping (a scheduled job calls this every few minutes so the first payment is not slow).
+    if (body?.action === 'ping') return reply({ ok: true })
+    // Razorpay webhook: Razorpay tells us the moment a QR is paid, so the gate turns Paid without waiting for a poll.
+    if (subroute === 'razorpay-webhook') return await razorpayWebhook(request, raw, body)
     const action = isPaymentRoute(subroute) ? subroute : body?.action
     const args = isPaymentRoute(subroute) ? [] : body?.args
     if (typeof action !== 'string' || !Array.isArray(args)) return reply({ error: 'Invalid request.' }, 400)
