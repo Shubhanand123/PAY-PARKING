@@ -214,3 +214,6 @@
 .gh-row { flex-wrap: nowrap; min-width: 0; }
 @media (max-width: 360px) { .gh-time { display: none; } .gh-name { letter-spacing: .06em; } }
 @media (min-width: 700px) { .gh + .content { padding-inline: 24px; } }
+
+.gh-mark { width: auto; height: 32px; padding: 3px 7px; }
+.gh-mark img { height: 100%; width: auto; display: block; }

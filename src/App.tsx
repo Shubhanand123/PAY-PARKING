@@ -259,7 +259,7 @@ function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: 
   return (
     <header className={'gh gh-' + view}>
       <div className="gh-row">
-        <span className="gh-mark"><Ico n="p" size={22} /></span>
+        <span className="gh-mark"><img src="skc.svg" alt="SKC" /></span>
         <b className="gh-name">PARKAR</b>
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (online ? '' : ' off')}><i />{online ? 'Online' : 'Offline'}</span>
