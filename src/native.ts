@@ -7,6 +7,7 @@ type PlateReaderPlugin = {
   scan(options: { qr: boolean; title: string }): Promise<NativeScan>
   version(): Promise<{ versionCode: number; versionName: string }>
   openExternal(options: { url: string }): Promise<void>
+  print(options: { name: string }): Promise<void>
 }
 export const PlateReader = registerPlugin<PlateReaderPlugin>('PlateReader')
 export const nativeApp = Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('PlateReader')

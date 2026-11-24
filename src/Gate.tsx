@@ -8,15 +8,45 @@ import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash
 import { useEffect, useRef, useState } from 'react'
 import {
   activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
-  isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, type DB, type Staff, type Ticket,
+  isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, type DB, type Receipt, type Staff, type Ticket,
 } from './engine'
+import { printSlip } from './print'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
 import { saveStart, saveEnd, saveFloat } from './done'
 import { cashCelebrate } from './celebrate'
 import { alreadyInside, ticketCancelled } from './fx'
 
 // ---------- 58 mm parking slip ----------
+/** The exit receipt exactly as it was saved when the bill was paid. */
+function ReceiptCopy({ r, t }: { r: Receipt; t: Ticket }) {
+  return (
+    <div className="slip" aria-label="Receipt">
+      <div className="slip-sim">58 mm</div>
+      <b className="slip-h">{r.operator}</b>
+      <div>{r.siteName}</div>
+      <div className="slip-s">{r.address} · {r.phone}</div>
+      <hr />
+      <div className="slip-big">{r.free ? 'RECEIPT · FREE' : 'RECEIPT'}</div>
+      <div className="slip-row"><span>Receipt</span><b>{r.receiptNo}</b></div>
+      <div className="slip-row"><span>Ticket</span><b>{r.ticketId}</b></div>
+      <div className="slip-plate">{prettyPlate(r.plate)}</div>
+      <div className="slip-row"><span>Vehicle</span><b>{r.vehicle}</b></div>
+      <div className="slip-row"><span>Entry</span><b>{fmtDT(r.entryAt)}</b></div>
+      <div className="slip-row"><span>Billed</span><b>{fmtDT(r.billedAt)}</b></div>
+      <div className="slip-row"><span>Stay</span><b>{dur(r.minutes * 60000)}</b></div>
+      <hr />
+      {r.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
+      <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(r.totalPaise)}</b></div>
+      {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid online (Razorpay)' : 'Cash paid'}</span><b>{rupees(p.amountPaise)}</b></div>)}
+      {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
+      <div className="slip-qr"><QR text={ticketUrl(t.token)} size={110} /></div>
+      <div className="slip-s">Thank you · Issued by {r.issuedBy}</div>
+    </div>
+  )
+}
+
 export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean }) {
+  if (receipt && t.receipt) return <ReceiptCopy r={t.receipt} t={t} />
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const r = tv.rates[t.category]
   const cat = db.categories.find(c => c.id === t.category)
@@ -91,11 +121,12 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       const r = await createEntry(me.id, plate, cat || already?.category || '', prepaid ? hours : 0, note, advance)
       setDone({ t: r.ticket, dup: r.duplicate })
       if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
+      else void printSlip().then(() => print(r.ticket)) // the slip prints by itself; Reprint stays on screen
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
   const print = async (t: Ticket) => {
     try {
-      await markPrinted(me.id, t.id)
+      await markPrinted(me.id, t.id, 'slip')
       setPrintFail(false)
     } catch (error) {
       setPrintFail(true)
@@ -110,10 +141,10 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       <div className="stack">
         {done.dup
           ? <div className="banner banner-warn"><Ico n="warn" /> <div><b>Already inside.</b> {prettyPlate(t.plate)} came in at {fmtTime(t.entryAt)}. No new ticket was made. You can reprint this one.</div></div>
-          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'The print request was not logged. You can try again.' : 'Slip ready to print.'}</div></div>}
+          : <div className="banner banner-ok"><Ico n="check" /> <div><b>Ticket {t.id} saved.</b> {printFail ? 'The print was not logged. Tap Reprint slip to try again.' : t.prints > 0 ? 'Slip printed. Hand it to the customer.' : 'Printing the slip…'}</div></div>}
         <Slip db={db} t={t} />
         <div className="row2">
-          <button className="btn btn-ghost" onClick={() => { window.print(); void print(t) }}><Ico n="print" /> {printFail ? 'Retry print' : t.prints > 0 ? 'Reprint slip' : 'Print slip'}</button>
+          <button className="btn btn-ghost" onClick={() => void printSlip().then(() => print(t))}><Ico n="print" /> {done.dup && t.prints === 0 ? 'Print slip' : 'Reprint slip'}</button>
           <button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, next)}><Ico n="check" /> Next vehicle</button>
         </div>
 
@@ -138,6 +169,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
         {chk && <div className="plate-meta">
           {validPlate ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">Check the plate format, e.g. GA 01 AB 1234</Pill>}
           {conf !== null && <Pill tone="warn">Check the scanned plate</Pill>}
+          {validPlate && freeVehicleFor(db, plate) && <Pill tone="ok">Free vehicle · {freeVehicleFor(db, plate)!.reason}</Pill>}
         </div>}
         {chk?.suggestion && isSupportedPlateFormat(chk.suggestion) && <button className="btn btn-ghost sug" onClick={() => { setPlate(chk.suggestion!); setConf(null) }}>Use {prettyPlate(chk.suggestion)}</button>}
         {conf !== null && /[VY]/.test(plate) && <p className="tiny muted">Check V and Y against the plate.</p>}
@@ -226,6 +258,18 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
     if (!near.length) return toast('No vehicle inside matches. Try the last 4 digits.', true)
     setPick(near)
   }
+  const printReceipt = async (x: Ticket) => {
+    await printSlip()
+    try { await markPrinted(me.id, x.id, 'receipt') } catch (error) { toast((error as Error).message, true) }
+  }
+  // As soon as the bill is paid (cash, free, or online) the receipt prints by itself, once per ticket.
+  const autoPrinted = useRef('')
+  const paidNow = t && t.status === 'paid' && !t.receiptPrints ? t : undefined
+  useEffect(() => {
+    if (!paidNow || autoPrinted.current === paidNow.id) return
+    autoPrinted.current = paidNow.id
+    void printReceipt(paidNow)
+  })
   const reset = () => { setId(null); setQ(''); setScannedPlate(false); setPlateAlternatives([]); setPick(null); setCancelling(false); setReason('') }
 
   // The POS's built-in barcode scanner types the ticket QR like a keyboard and presses Enter.
@@ -288,13 +332,15 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         {t.status === 'inside' && db.razorpayEnabled && b.duePaise >= 100 && (!stale || t.onlineCheckout) &&
           <RazorpayCheckout key={t.id} ticketId={t.id} token={t.token} amount={b.duePaise} name={db.settings.operator} hasOrder={Boolean(t.onlineCheckout)} linkUrl={t.onlineCheckout?.linkUrl} upiQr={t.onlineCheckout?.upiQr} qrImage={t.onlineCheckout?.qrImage} test={db.razorpayTest} pos onRevision={setRev} />}
         {t.status === 'inside' && !stale && !t.onlineCheckout && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
-          {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> Nothing due · Continue</>}
+          {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> {b.free ? `Free vehicle (${b.free.reason}) · Continue` : 'Nothing due · Continue'}</>}
         </button></div>}
         {t.status === 'paid' && <>
-          <div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>{t.totalPaise ? `Paid ${rupees(t.totalPaise)}` : 'Nothing due'}</b><span>Let the vehicle out, then tap below.</span></div></div>
+          <div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>{t.free ? `Free · ${t.free.reason}` : t.totalPaise ? `Paid ${rupees(t.totalPaise)}` : 'Nothing due'}</b><span>{t.receiptPrints ? 'Receipt printed. Hand it over, let the vehicle out, then tap below.' : 'Printing the receipt…'}</span></div></div>
+          <Slip db={db} t={t} receipt />
+          <button className="btn btn-ghost" onClick={() => void printReceipt(t)}><Ico n="print" /> Reprint receipt</button>
           <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('', async () => { const r = await recordExit(me.id, t.id); setRev(r.rev) })}><Ico n="out" size={24} /> Vehicle left · Close ticket</button></div>
         </>}
-        {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}. Receipt ready to print.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-ghost" onClick={() => { window.print(); void markPrinted(me.id, t.id).catch(error => toast(error.message, true)) }}><Ico n="print" /> Print receipt</button><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Save · Next vehicle</button></>}
+        {t.status === 'exited' && <><div className="paid-card"><span className="paid-ico"><Ico n="check" size={28} /></span><div><b>Closed · {t.free ? `Free (${t.free.reason})` : rupees(t.totalPaise ?? 0)}</b><span>Left at {fmtTime(t.exitAt!)} by {t.exitGate}.</span></div></div><Slip db={db} t={t} receipt /><button className="btn btn-ghost" onClick={() => void printReceipt(t)}><Ico n="print" /> Reprint receipt</button><button className="btn btn-primary" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" /> Next vehicle</button></>}
         {t.status === 'cancelled' && <div className="banner banner-bad"><Ico n="x" /><div><b>Cancelled</b> by {t.cancelledBy} at {fmtTime(t.cancelledAt!)}{t.cancelReason ? `: ${t.cancelReason}` : ''}.</div></div>}
         {(t.status === 'inside' || t.status === 'paid') && !t.onlineCheckout && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
         {cancelling && <div className="card">

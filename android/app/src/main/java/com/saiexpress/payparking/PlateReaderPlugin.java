@@ -5,7 +5,12 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.net.Uri;
+import android.content.Context;
 import android.os.Build;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
+import android.webkit.WebView;
 
 import androidx.activity.result.ActivityResult;
 
@@ -90,5 +95,27 @@ public class PlateReaderPlugin extends Plugin {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
         call.resolve();
+    }
+
+    /** Prints the current page (only the slip/receipt is visible in print) through Android's print service,
+     *  on a 58 mm roll. Which printer is used depends on the print services installed on the POS. */
+    @PluginMethod
+    public void print(PluginCall call) {
+        String name = call.getString("name", "Pay Parking");
+        getActivity().runOnUiThread(() -> {
+            try {
+                PrintManager manager = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);
+                WebView view = getBridge().getWebView();
+                PrintDocumentAdapter adapter = view.createPrintDocumentAdapter(name);
+                PrintAttributes roll = new PrintAttributes.Builder()
+                    .setMediaSize(new PrintAttributes.MediaSize("roll58", "58 mm roll", 2283, 7874))
+                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                    .build();
+                manager.print(name, adapter, roll);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Printing is not available on this device.");
+            }
+        });
     }
 }

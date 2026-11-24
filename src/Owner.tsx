@@ -7,14 +7,15 @@ import {
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, useNow } from './ui'
-import { Slip, StatusPill } from './Gate'
+import { StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
+import { Customers, FreeVehicles, TicketPaper } from './OwnerExtras'
 
-type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings' | 'devices'
+type Tab = 'overview' | 'tickets' | 'customers' | 'free' | 'audit' | 'rates' | 'settings' | 'devices'
 
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
-  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
+  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['free', 'Free vehicles', 'check'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
   if (apiEnabled && !openAccess) tabs.push(['devices', 'Devices', 'gear'])
   return (
     <div className="owner">
@@ -23,7 +24,9 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
       </nav>
       <div className="owner-panel">
       {tab === 'overview' && <Overview db={db} />}
-      {tab === 'tickets' && <Tickets db={db} />}
+      {tab === 'tickets' && <Tickets db={db} me={me} toast={toast} />}
+      {tab === 'customers' && <Customers db={db} me={me} toast={toast} />}
+      {tab === 'free' && <FreeVehicles db={db} me={me} toast={toast} />}
       {tab === 'audit' && <AuditLog db={db} />}
       {tab === 'rates' && <Rates db={db} me={me} toast={toast} />}
       {tab === 'devices' && <div className="stack"><OwnerAccessTab toast={toast} /><AccountsTab toast={toast} /><DevicesTab toast={toast} /></div>}
@@ -48,13 +51,16 @@ function Overview({ db }: { db: DB }) {
     const avg = tOut.length ? tOut.reduce((a, t) => a + (t.exitAt! - t.entryAt), 0) / tOut.length : 0
     const lostSlip = db.audit.filter(a => a.kind === 'lookup_plate' && istDay(a.at) === today).length
     const reprints = db.audit.filter(a => a.kind === 'reprint' && istDay(a.at) === today).length
+    const receiptReprints = db.audit.filter(a => a.kind === 'receipt_reprint' && istDay(a.at) === today).length
+    const freeToday = db.tickets.filter(t => t.free && t.billedAt && istDay(t.billedAt) === today)
+    const waivedToday = freeToday.reduce((sum, t) => sum + (t.free?.waivedPaise ?? 0), 0)
     const days = Array.from({ length: 7 }, (_, i) => istDay(now - (6 - i) * 864e5))
     const daily = days.map(d => ({ d, v: db.payments.filter(p => istDay(p.at) === d).reduce((a, p) => a + p.amountPaise, 0), n: db.tickets.filter(t => istDay(t.entryAt) === d).length }))
     const hours = Array.from({ length: 24 }, (_, h) => ({ h, i: tIn.filter(t => istHour(t.entryAt) === h).length, o: tOut.filter(t => istHour(t.exitAt!) === h).length }))
     const byCat = db.categories.map(c => ({ name: c.name, icon: c.icon, n: inside.filter(t => t.category === c.id).length, rev: db.payments.filter(p => istDay(p.at) === today && db.tickets.find(t => t.id === p.ticketId)?.category === c.id).reduce((a, p) => a + p.amountPaise, 0) }))
     const longStay = inside.filter(t => now - t.entryAt > 12 * 36e5)
     const openRunning = inside.reduce((a, t) => a + billFor(db, t, now).duePaise, 0)
-    return { inside, tIn, tOut, cash, online, cancels, avg, lostSlip, reprints, daily, hours, byCat, longStay, openRunning }
+    return { inside, tIn, tOut, cash, online, cancels, avg, lostSlip, reprints, receiptReprints, freeToday, waivedToday, daily, hours, byCat, longStay, openRunning }
   }, [db, now, today])
   const cap = db.settings.capacity
   const occ = cap ? s.inside.length / cap : 0
@@ -68,7 +74,9 @@ function Overview({ db }: { db: DB }) {
         <Kpi icon="car" label="Entries today" value={String(s.tIn.length)} sub={`${s.tOut.length} left`} />
         <Kpi icon="clock" label="Average stay" value={s.avg ? dur(s.avg) : '–'} sub="vehicles that left today" />
         <Kpi icon="rupee" label="Due from cars inside" value={rupees(s.openRunning)} sub="if all left now" />
-        <Kpi icon="x" label="Cancelled today" value={String(s.cancels)} sub={`${s.reprints} reprints · ${s.lostSlip} plate lookups`} tone={s.cancels > 3 ? 'warn' : undefined} />
+        <Kpi icon="x" label="Cancelled today" value={String(s.cancels)} sub={`${s.lostSlip} plate lookups`} tone={s.cancels > 3 ? 'warn' : undefined} />
+        <Kpi icon="print" label="Reprints today" value={String(s.reprints + s.receiptReprints)} sub={`${s.reprints} slips · ${s.receiptReprints} receipts`} tone={s.reprints + s.receiptReprints > 5 ? 'warn' : undefined} />
+        <Kpi icon="check" label="Free exits today" value={String(s.freeToday.length)} sub={`${rupees(s.waivedToday)} waived`} />
       </div>
       <div className="grid2">
         <div className="card">
@@ -103,7 +111,7 @@ function Overview({ db }: { db: DB }) {
 }
 
 function FlowStrip() {
-  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved, then printed with QR'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash or online'], ['out', 'Leave', 'Exit and receipt']]
+  const steps: [string, string, string][] = [['scan', 'Entry', 'Scan plate, pick type'], ['print', 'Slip', 'Saved and printed by itself'], ['clock', 'Parked', 'Fee grows by the rates'], ['qr', 'Exit', 'Scan QR or plate'], ['cash', 'Pay', 'Cash, online or free · receipt prints'], ['out', 'Leave', 'Hand over receipt, close ticket']]
   return (
     <div className="flow" aria-label="How a vehicle moves through the system">
       <svg className="flow-road" viewBox="0 0 600 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10H600" strokeDasharray="10 10" /></svg>
@@ -187,7 +195,7 @@ function Empty({ text }: { text: string }) {
 }
 
 // ---------- tickets ----------
-function Tickets({ db }: { db: DB }) {
+function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [q, setQ] = useState('')
   const [st, setSt] = useState<'all' | Ticket['status']>('all')
   const [open, setOpen] = useState<string | null>(null)
@@ -215,7 +223,7 @@ function Tickets({ db }: { db: DB }) {
       </div>
       {sel && <div className="grid2">
         <div className="card"><h2>History of {sel.id}</h2>{db.audit.filter(a => a.ticketId === sel.id).map(a => <AuditRow key={a.id} a={a} />)}</div>
-        <Slip db={db} t={sel} receipt={sel.status === 'exited'} />
+        <TicketPaper db={db} t={sel} me={me} toast={toast} />
       </div>}
     </div>
   )
@@ -238,6 +246,7 @@ const KIND: Record<AuditKind, [string, 'ok' | 'warn' | 'bad' | 'info' | 'mute']>
   entry: ['Entry', 'info'], print: ['Print', 'mute'], reprint: ['Reprint', 'warn'], lookup_plate: ['Plate lookup', 'warn'], lookup_qr: ['Opened', 'mute'],
   plate_fix: ['Plate fixed', 'warn'], payment: ['Payment', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
   settings: ['Settings', 'warn'], duplicate_blocked: ['Duplicate blocked', 'warn'], login: ['Login', 'mute'],
+  receipt_print: ['Receipt', 'mute'], receipt_reprint: ['Receipt reprint', 'warn'], free_vehicle: ['Free list', 'warn'],
 }
 function AuditRow({ a }: { a: DB['audit'][number] }) {
   const [l, tone] = KIND[a.kind]
@@ -247,7 +256,7 @@ function AuditLog({ db }: { db: DB }) {
   const [kind, setKind] = useState<'all' | 'money' | 'risk' | AuditKind>('risk')
   const [who, setWho] = useState('all')
   const [q, setQ] = useState('')
-  const risk: AuditKind[] = ['cancel', 'reprint', 'lookup_plate', 'tariff', 'settings', 'duplicate_blocked', 'plate_fix']
+  const risk: AuditKind[] = ['cancel', 'reprint', 'receipt_reprint', 'free_vehicle', 'lookup_plate', 'tariff', 'settings', 'duplicate_blocked', 'plate_fix']
   const list = db.audit.filter(a => (kind === 'all' || (kind === 'money' ? ['payment', 'exit'].includes(a.kind) : kind === 'risk' ? risk.includes(a.kind) : a.kind === kind))
     && (who === 'all' || a.by === who) && (!q || (a.text + a.ticketId).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
   const today = istDay(Date.now())

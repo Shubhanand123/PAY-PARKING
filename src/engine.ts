@@ -45,10 +45,28 @@ export type Ticket = {
   billedAt?: number     // time the exit bill was locked
   totalPaise?: number   // full charge for the stay
   cancelledBy?: string; cancelledAt?: number; cancelReason?: string
-  prints: number
+  prints: number        // entry slip prints (first print + reprints)
+  receiptPrints?: number // exit receipt prints (first print + reprints)
+  receipt?: Receipt     // exact copy of the receipt, frozen when payment was completed
+  free?: FreeExit       // set when the exit was free for a designated vehicle
   rev: number           // bumps on every change; stale writes are refused
 }
-export type AuditKind = 'entry' | 'print' | 'reprint' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login'
+
+/** A vehicle the owner lets park free (staff, police, ambulance…). Matched by plate at the exit. */
+export type FreeVehicle = { plate: string; reason: string; note?: string; addedAt: number; addedBy: string; active: boolean; removedAt?: number; removedBy?: string }
+export type FreeExit = { reason: string; waivedPaise: number }
+
+/** Everything printed on the exit receipt, frozen when the bill is paid, so every reprint and the
+ *  Owner dashboard show exactly what the customer was given, even if settings change later. */
+export type Receipt = {
+  receiptNo: string; issuedAt: number; issuedBy: string
+  operator: string; siteName: string; address: string; phone: string
+  ticketId: string; plate: string; vehicle: string; entryAt: number; entryGate: string
+  billedAt: number; minutes: number; lines: Line[]; totalPaise: number
+  payments: { method: Payment['method']; kind: Payment['kind']; amountPaise: number; receiptNo: string }[]
+  free?: FreeExit
+}
+export type AuditKind = 'entry' | 'print' | 'reprint' | 'receipt_print' | 'receipt_reprint' | 'free_vehicle' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login'
 export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticketId?: string; text: string; amountPaise?: number }
 
 export type DB = {
@@ -62,6 +80,7 @@ export type DB = {
   tickets: Ticket[]
   payments: Payment[]
   audit: Audit[]
+  freeVehicles?: FreeVehicle[]
 }
 
 const KEY = 'parking-demo-v1'
@@ -124,7 +143,7 @@ export const prettyPlate = (p: string) => checkPlate(p).pretty
 
 // ---------- the bill ----------
 export type Line = { label: string; paise: number }
-export type Bill = { minutes: number; chargedHours: number; lines: Line[]; totalPaise: number; prepaidPaise: number; duePaise: number; inGrace: boolean }
+export type Bill = { minutes: number; chargedHours: number; lines: Line[]; totalPaise: number; prepaidPaise: number; duePaise: number; inGrace: boolean; free?: FreeExit }
 
 /** Charge for one stay of `minutes`, under `rate` with `graceMin`. Pure: the same inputs always give the same bill. */
 export function charge(minutes: number, rate: Rate, graceMin: number): { lines: Line[]; total: number; hours: number; inGrace: boolean } {
@@ -169,8 +188,16 @@ export function billFor(db: DB, t: Ticket, at: number): Bill {
   const prepaid = db.payments.filter(p => p.ticketId === t.id && p.kind === 'prepaid').reduce((s, p) => s + p.amountPaise, 0)
   const paidExit = db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').reduce((s, p) => s + p.amountPaise, 0)
   // Pay at entry: the customer always pays at least the block they chose, even if they leave early.
-  const total = Math.max(c.total, prepaid)
   const lines = [...c.lines]
+  // Designated free vehicles: frozen on the ticket once billed, otherwise looked up by plate now.
+  const freeVehicle = t.free ? undefined : freeVehicleFor(db, t.plate)
+  const free = t.free ?? (freeVehicle && c.total > 0 ? { reason: freeVehicle.reason, waivedPaise: Math.max(0, c.total - prepaid) } : undefined)
+  if (free) {
+    lines.push({ label: `Free vehicle · ${free.reason}`, paise: -free.waivedPaise })
+    if (prepaid) lines.push({ label: 'Paid at entry', paise: -prepaid })
+    return { minutes, chargedHours: c.hours, lines, totalPaise: prepaid, prepaidPaise: prepaid, duePaise: 0, inGrace: c.inGrace, free }
+  }
+  const total = Math.max(c.total, prepaid)
   if (prepaid && c.total < prepaid) lines.push({ label: 'Minimum: prepaid block', paise: prepaid - c.total })
   if (prepaid) lines.push({ label: 'Paid at entry', paise: -prepaid })
   return { minutes, chargedHours: c.hours, lines, totalPaise: total, prepaidPaise: prepaid, duePaise: Math.max(0, total - prepaid - paidExit), inGrace: c.inGrace }
@@ -269,6 +296,23 @@ export function activeTariff(db: DB, at = Date.now()) {
   return [...db.tariffs].filter(t => t.createdAt <= at).sort((a, b) => b.version - a.version)[0] ?? db.tariffs[0]
 }
 
+export const freeVehicleFor = (db: DB, plate: string) => (db.freeVehicles ?? []).find(v => v.active && v.plate === normPlate(plate))
+
+/** Freeze the receipt exactly as it will be printed. Called when the bill is paid. */
+export function makeReceipt(db: DB, t: Ticket, by: string): Receipt {
+  const b = billFor(db, t, t.billedAt ?? Date.now())
+  const pays = db.payments.filter(p => p.ticketId === t.id)
+  const last = pays[pays.length - 1]
+  return {
+    receiptNo: last?.receiptNo ?? 'R-' + t.id.slice(2), issuedAt: Date.now(), issuedBy: by,
+    operator: db.settings.operator, siteName: db.settings.siteName, address: db.settings.address, phone: db.settings.phone,
+    ticketId: t.id, plate: t.plate, vehicle: db.categories.find(c => c.id === t.category)?.name ?? t.category, entryAt: t.entryAt, entryGate: t.entryGate,
+    billedAt: t.billedAt ?? Date.now(), minutes: b.minutes, lines: b.lines, totalPaise: t.totalPaise ?? b.totalPaise,
+    payments: pays.map(p => ({ method: p.method, kind: p.kind, amountPaise: p.amountPaise, receiptNo: p.receiptNo })),
+    free: t.free,
+  }
+}
+
 export function load(): DB {
   try { const s = localStorage.getItem(KEY); if (s) return JSON.parse(s) } catch { /* fall through */ }
   const db = seed(false); save(db); return db
@@ -312,9 +356,17 @@ export const createEntry = (db: DB, s: Staff, plate: string, category: string, p
   return { ticket: t, duplicate: false }
 }
 
-export const markPrinted = (db: DB, s: Staff, id: string) => {
+/** Log a print. `what` is the entry slip (default, for older devices) or the exit receipt. */
+export const markPrinted = (db: DB, s: Staff, id: string, what?: 'slip' | 'receipt' | null) => {
   const t = db.tickets.find(x => x.id === id)
   if (!t) throw new Refused('Ticket not found.')
+  if (what === 'receipt') {
+    if (!t.receipt && t.status !== 'paid' && t.status !== 'exited') throw new Refused('There is no receipt yet. Take payment first.')
+    t.receiptPrints = (t.receiptPrints ?? 0) + 1
+    const n = t.receiptPrints
+    log(db, s, n > 1 ? 'receipt_reprint' : 'receipt_print', n > 1 ? `Reprint #${n - 1} of receipt` : 'Receipt printed', id)
+    return n
+  }
   t.prints++
   log(db, s, t.prints > 1 ? 'reprint' : 'print', t.prints > 1 ? `Reprint #${t.prints - 1} of slip` : 'Slip printed', id)
   return t.prints
@@ -347,7 +399,9 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
   if (b.duePaise !== expectedPaise) throw new Refused(`Amount changed to ${rupees(b.duePaise)} (time moved on). Check and try again.`)
   if (b.duePaise) addPayment(db, t, b.duePaise, s.id, now, 'exit').by = s.name
   t.status = 'paid'; t.billedAt = now; t.totalPaise = b.totalPaise; t.rev++
-  log(db, s, 'payment', b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
+  if (b.free) t.free = b.free
+  t.receipt = makeReceipt(db, t, s.name)
+  log(db, s, 'payment', b.free ? `Free vehicle (${b.free.reason}) · ${rupees(b.free.waivedPaise)} waived` : b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
   return t
 }
 
@@ -366,6 +420,7 @@ export function settleOnlinePayment(db: DB, staff: Staff, ticket: Ticket, orderI
   ticket.billedAt = order.billedAt
   ticket.totalPaise = order.totalPaise
   ticket.rev++
+  ticket.receipt = makeReceipt(db, ticket, staff.name)
   log(db, staff, 'payment', `Razorpay ${rupees(order.amount)} received`, ticket.id, order.amount)
   return ticket
 }
@@ -404,3 +459,25 @@ export const saveSettings = (db: DB, s: Staff, next: Settings) => {
 }
 
 export const byToken = (db: DB, tk: string) => db.tickets.find(t => t.token === tk)
+
+/** Owner: let a vehicle park free (staff, police, ambulance…). Every change is in the master audit. */
+export const addFreeVehicle = (db: DB, s: Staff, plate: string, reason: string, note?: string | null) => {
+  if (s.role !== 'owner') throw new Refused('Only the Owner can manage free vehicles.')
+  const p = normPlate(plate)
+  if (!isSupportedPlateFormat(p)) throw new Refused('Enter a supported Indian registration format, such as GA 01 AB 1234.')
+  const why = reason.trim().slice(0, 60)
+  if (!why) throw new Refused('Choose why this vehicle parks free.')
+  db.freeVehicles ??= []
+  const existing = freeVehicleFor(db, p)
+  if (existing) { existing.reason = why; existing.note = note?.trim() || undefined }
+  else db.freeVehicles.push({ plate: p, reason: why, note: note?.trim() || undefined, addedAt: Date.now(), addedBy: s.name, active: true })
+  log(db, s, 'free_vehicle', `${existing ? 'Updated' : 'Added'} free vehicle ${prettyPlate(p)} · ${why}`)
+}
+
+export const removeFreeVehicle = (db: DB, s: Staff, plate: string) => {
+  if (s.role !== 'owner') throw new Refused('Only the Owner can manage free vehicles.')
+  const v = freeVehicleFor(db, plate)
+  if (!v) throw new Refused('That vehicle is not on the free list.')
+  v.active = false; v.removedAt = Date.now(); v.removedBy = s.name
+  log(db, s, 'free_vehicle', `Removed free vehicle ${prettyPlate(v.plate)} · was ${v.reason}`)
+}

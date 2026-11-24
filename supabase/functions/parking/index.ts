@@ -143,13 +143,15 @@ async function redeemPosCode(args: unknown[]) {
 
 const actions = {
   createEntry: { roles: ['entry', 'owner'], fn: parking.createEntry, checks: ['text', 'text', 'integer', 'optionalText', 'optionalInteger'] },
-  markPrinted: { roles: ['entry', 'exit', 'owner'], fn: parking.markPrinted, checks: ['text'] },
+  markPrinted: { roles: ['entry', 'exit', 'owner'], fn: parking.markPrinted, checks: ['text', 'printKind'] },
   logLookup: { roles: ['exit', 'owner'], fn: parking.logLookup, checks: ['text', 'lookup'] },
   takeCash: { roles: ['exit', 'owner'], fn: parking.takeCash, checks: ['text', 'integer', 'integer'] },
   recordExit: { roles: ['exit', 'owner'], fn: parking.recordExit, checks: ['text'] },
   cancelTicket: { roles: ['exit', 'owner'], fn: parking.cancelTicket, checks: ['text', 'text'] },
   publishTariff: { roles: ['owner'], fn: parking.publishTariff, checks: ['integer', 'rates', 'text'] },
   saveSettings: { roles: ['owner'], fn: parking.saveSettings, checks: ['settings'] },
+  addFreeVehicle: { roles: ['owner'], fn: parking.addFreeVehicle, checks: ['text', 'text', 'optionalText'] },
+  removeFreeVehicle: { roles: ['owner'], fn: parking.removeFreeVehicle, checks: ['text'] },
 }
 
 const isInteger = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 100000000
@@ -163,6 +165,7 @@ function valid(kind: string, value: unknown, db: parking.DB): boolean {
     case 'integer': return isInteger(value)
     case 'optionalInteger': return value == null || isInteger(value)
     case 'lookup': return value === 'plate' || value === 'qr' || value === 'search'
+    case 'printKind': return value == null || value === 'slip' || value === 'receipt'
     case 'rates': return isObject(value) && Object.keys(value).length === db.categories.length && db.categories.every(({ id }) => {
       const rate = value[id]
       return isObject(rate) && isInteger(rate.firstHours) && Number(rate.firstHours) >= 1 && Number(rate.firstHours) <= 24
@@ -575,12 +578,14 @@ Deno.serve(async request => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const { db, version } = await state()
       if (action === 'createEntry' && args.length === 4) args.push(null)
+      // Older devices send markPrinted(ticket) without saying slip or receipt; addFreeVehicle note is optional.
+      if ((action === 'markPrinted' || action === 'addFreeVehicle') && args.length === command.checks.length - 1) args.push(null)
       if (args.length !== command.checks.length || !command.checks.every((kind, index) => valid(kind, args[index], db))) {
         return reply({ error: 'Check the parking details and try again.' }, 400)
       }
       const commandFn = command.fn as (db: parking.DB, staff: parking.Staff, ...args: unknown[]) => unknown
       const atExit = action === 'markPrinted'
-        ? db.tickets.some(ticket => ticket.id === args[0] && ticket.status === 'exited')
+        ? args[1] === 'receipt' || (args[1] == null && db.tickets.some(ticket => ticket.id === args[0] && ticket.status === 'exited'))
         : action !== 'createEntry'
       const staffId = role === 'owner' || (role === 'open' && command.roles.length === 1 && command.roles[0] === 'owner') ? 'owner'
         : role === 'exit' || ((role === 'both' || role === 'open') && atExit) ? 'sunil' : 'ravi'
