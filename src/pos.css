@@ -325,3 +325,5 @@
 .card h2 { text-wrap: balance; }
 .kpi-v { overflow-wrap: anywhere; }
 .log-filters input { grid-column: 1 / -1; }
+
+.next-hint { margin: 0; text-align: center; font-size: 13.5px; font-weight: 600; color: var(--color-text-secondary); animation: rise-in 220ms var(--ease) both; }

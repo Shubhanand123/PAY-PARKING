@@ -126,6 +126,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
       const note = conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
       const r = await createEntry(me.id, plate, cat || already?.category || '', prepaid ? hours : 0, note, advance)
       setDone({ t: r.ticket, dup: r.duplicate })
+      try { navigator.vibrate?.(r.duplicate ? [40, 60, 40] : 35) } catch { /* no vibration */ }
       if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
       else void printSlip().then(() => print(r.ticket)) // the slip prints by itself; Reprint stays on screen
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
@@ -139,7 +140,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
       toast((error as Error).message, true)
     }
   }
-  const next = () => { setDone(null); setPlate(''); setConf(null); setAlternatives([]); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); setTimeout(() => inp.current?.focus(), 50) }
+  const next = () => { setDone(null); setPlate(''); setConf(null); setAlternatives([]); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); window.scrollTo({ top: 0, behavior: 'smooth' }) } // no keyboard: the next vehicle starts with Scan plate
 
   if (done) {
     const t = db.tickets.find(x => x.id === done.t.id) ?? done.t
@@ -167,7 +168,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
           setAlternatives(result.alternatives)
         }} />}
         <label className="lbl" htmlFor="plate">Vehicle number</label>
-        <input id="plate" ref={inp} className="field plate-field" value={plate} autoFocus inputMode="text" autoCapitalize="characters" autoComplete="off"
+        <input id="plate" ref={inp} className="field plate-field" value={plate} inputMode="text" enterKeyHint="done" autoCapitalize="characters" autoComplete="off"
           placeholder="MH 12 AB 1234" onChange={e => { setPlate(normPlate(e.target.value)); setConf(null); setAlternatives([]) }} />
         {chk && <div className="plate-meta">
           {validPlate ? <Pill tone="ok">{chk.kind === 'bharat' ? 'Bharat series' : chk.kind === 'temporary' ? 'Temporary' : 'Valid format'} · {chk.pretty}</Pill> : <Pill tone="warn">Check the plate format, e.g. GA 01 AB 1234</Pill>}
@@ -208,6 +209,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
           </div>}
         </fieldset>
       )}
+      {!already && (!validPlate || !cat) && <p className="next-hint">{!validPlate ? 'Scan the plate or type the number' : 'Now tap the vehicle type'}</p>}
       <div className="actionbar"><button className="btn btn-primary btn-xl" disabled={(!validPlate && !already) || (!cat && !already) || busy || scanning} onClick={confirm}>
         <Ico n={already ? 'search' : 'check'} size={24} />
         {busy ? 'Saving…' : already ? 'Open existing ticket' : prepaid && advance > 0 ? `Record ${rupees(advance)} cash & save` : 'Save entry'}
