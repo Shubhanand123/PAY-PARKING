@@ -99,7 +99,13 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
     setFailed(false)
     return true
   }
-  function finish() { busyRef.current = false; setBusy(false) }
+  function finish() {
+    busyRef.current = false
+    setBusy(false)
+    // Razorpay's window can leave the page locked; always give scrolling back.
+    document.body.style.overflow = ''
+    document.documentElement.style.overflow = ''
+  }
   function showFailure(error: unknown) {
     setFailed(true)
     setMessage(error instanceof Error ? error.message : 'Could not verify the payment. Check payment status before retrying.')
@@ -215,13 +221,13 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   if (!pos && qr) return <p className="msg info">Scan the UPI QR on the attendant's screen to pay.</p>
 
   return <section className="stack razorpay-actions" aria-label="Online payment">
-    {pos && !hasOrder && <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void showUpiQr()}>
+    {pos && !hasOrder && !test && <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void showUpiQr()}>
       <Ico n="qr" size={24} /> {busy ? 'Working…' : <>Show UPI QR · {rupees(amount)}</>}
     </button>}
     {linkUrl
       ? <a className="btn btn-primary btn-xl" href={linkUrl} target="_blank" rel="noopener noreferrer">Open Razorpay payment · {rupees(amount)}</a>
-      : <button className={'btn ' + (pos ? 'btn-ghost' : 'btn-primary btn-xl')} disabled={busy || amount < 100} onClick={() => void open()}>
-        {busy && !pos ? 'Working…' : <>{hasOrder ? 'Resume Razorpay' : pos ? 'Card / other · Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
+      : <button className={'btn ' + (pos && !test ? 'btn-ghost' : 'btn-primary btn-xl')} disabled={busy || amount < 100} onClick={() => void open()}>
+        {busy && (!pos || test) ? 'Working…' : <>{hasOrder ? 'Resume Razorpay' : pos && !test ? 'Card / other · Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
       </button>}
     {hasOrder && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
     {pos && hasOrder && (confirmCash
