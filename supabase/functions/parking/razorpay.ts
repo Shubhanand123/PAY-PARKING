@@ -82,7 +82,7 @@ export async function capturedQrPayment(credentials: RazorpayCredentials, qrId: 
   const captured = payments.items.find(payment => payment.status === 'captured' && payment.amount === amount)
   if (captured) return captured
   const authorized = payments.items.find(payment => payment.status === 'authorized' && payment.amount === amount)
-  if (!authorized) return undefined
+  if (!authorized) { if (payments.items.length) console.log('QR ' + qrId + ' payments: ' + payments.items.map(p => p.id + ' ' + p.status + ' ' + p.amount).join(', ')); return undefined }
   try { return await request<RazorpayPayment>(credentials, 'payments/' + authorized.id + '/capture', { amount, currency: 'INR' }) }
   catch {
     // Captured by Razorpay in the meantime (or capture refused): read it again.
