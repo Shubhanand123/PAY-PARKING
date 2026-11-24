@@ -86,6 +86,7 @@ public class PlateScanActivity extends AppCompatActivity {
         preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
         root.addView(preview, match());
         overlay = new ScanOverlay(this);
+        overlay.setPlateStyle(readsQr); // the exit screen reads ticket QRs too
         root.addView(overlay, match());
 
         TextView title = label(getIntent().getStringExtra(EXTRA_TITLE) != null ? getIntent().getStringExtra(EXTRA_TITLE) : "Scan plate", 20, true);
@@ -207,6 +208,8 @@ public class PlateScanActivity extends AppCompatActivity {
 
     private void finishWith(String plate, List<String> alternatives, String qrValue) {
         finished = true;
+        // a light buzz so the operator feels the read without looking; needs no extra permission
+        overlay.performHapticFeedback(android.os.Build.VERSION.SDK_INT >= 30 ? android.view.HapticFeedbackConstants.CONFIRM : android.view.HapticFeedbackConstants.VIRTUAL_KEY);
         Intent data = new Intent();
         if (qrValue != null) {
             data.putExtra(RESULT_QR, qrValue);

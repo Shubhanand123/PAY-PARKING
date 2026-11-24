@@ -27,6 +27,9 @@ final class ScanOverlay extends View {
     private final Paint chip = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint chipText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint tick = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private boolean hsrp;
     private final RectF guide = new RectF();
     private final float density;
     private float sweep; // 0..1 position of the scan line
@@ -49,6 +52,12 @@ final class ScanOverlay extends View {
         chipText.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         chipText.setTextAlign(Paint.Align.CENTER);
         chipText.setLetterSpacing(0.06f);
+        small.setTextSize(10 * density);
+        small.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        small.setTextAlign(Paint.Align.CENTER);
+        small.setLetterSpacing(0.1f);
+        border.setStyle(Paint.Style.STROKE);
+        border.setStrokeWidth(3 * density);
         tick.setStyle(Paint.Style.STROKE);
         tick.setStrokeWidth(4 * density);
         tick.setStrokeCap(Paint.Cap.ROUND);
@@ -66,6 +75,9 @@ final class ScanOverlay extends View {
 
     /** Fraction of the view the guide covers; the activity uses the same box to prefer text inside it. */
     static final float SIDE = 0.06f, TOP = 0.30f, BOTTOM = 0.30f;
+
+    /** At the exit, the read plate pops up as a number plate with the blue IND strip. */
+    void setPlateStyle(boolean numberPlate) { hsrp = numberPlate; }
 
     void setState(State next, String plateText) {
         if (next == state && plateText.equals(plate)) return;
@@ -104,23 +116,43 @@ final class ScanOverlay extends View {
         drawCorner(c, l, b, arm, -arm); drawCorner(c, r, b, -arm, -arm);
 
         if (state != State.DONE) {
-            float y = guide.top + 6 * density + (guide.height() - 12 * density) * sweep;
-            line.setShader(new LinearGradient(guide.left, y, guide.right, y,
-                new int[] { Color.TRANSPARENT, color, Color.WHITE, color, Color.TRANSPARENT }, null, Shader.TileMode.CLAMP));
-            line.setStrokeWidth(3 * density);
-            line.setShadowLayer(10 * density, 0, 0, color);
-            c.drawLine(guide.left + 8 * density, y, guide.right - 8 * density, y, line);
+            // a soft laser band sweeping up and down inside the guide
+            float band = guide.height() * 0.24f;
+            float top = guide.top + (guide.height() - band) * sweep;
+            int glow = Color.argb(66, Color.red(color), Color.green(color), Color.blue(color));
+            line.setShadowLayer(0, 0, 0, 0);
+            line.setShader(new LinearGradient(0, top, 0, top + band,
+                new int[] { Color.TRANSPARENT, glow, Color.argb(240, 230, 255, 250), Color.TRANSPARENT },
+                new float[] { 0f, 0.82f, 0.97f, 1f }, Shader.TileMode.CLAMP));
+            c.drawRect(guide.left, top, guide.right, top + band, line);
         }
 
         if (state == State.DONE && pop > 0) {
             float cx = w / 2, cy = guide.centerY();
             c.save();
             c.scale(0.6f + 0.4f * pop, 0.6f + 0.4f * pop, cx, cy);
-            float tw = chipText.measureText(plate) + 40 * density, th = 52 * density;
-            chip.setColor(Color.WHITE);
+            float strip = hsrp ? 22 * density : 0;
+            float tw = chipText.measureText(plate) + 40 * density + strip, th = 52 * density;
+            float left = cx - tw / 2, top = cy - th / 2 + 24 * density;
+            chip.setColor(hsrp ? Color.rgb(251, 251, 247) : Color.WHITE);
             chip.setShadowLayer(16 * density, 0, 6 * density, Color.argb(120, 0, 0, 0));
-            c.drawRoundRect(cx - tw / 2, cy - th / 2 + 24 * density, cx + tw / 2, cy + th / 2 + 24 * density, 12 * density, 12 * density, chip);
-            c.drawText(plate, cx, cy + 24 * density + chipText.getTextSize() * 0.35f, chipText);
+            c.drawRoundRect(left, top, left + tw, top + th, 10 * density, 10 * density, chip);
+            chip.setShadowLayer(0, 0, 0, 0);
+            if (hsrp) {
+                chip.setColor(Color.rgb(31, 79, 191));
+                c.save();
+                c.clipRect(left, top, left + strip, top + th);
+                c.drawRoundRect(left, top, left + strip + 12 * density, top + th, 10 * density, 10 * density, chip);
+                c.restore();
+                small.setColor(Color.WHITE);
+                c.save();
+                c.rotate(-90, left + strip / 2, top + th / 2);
+                c.drawText("IND", left + strip / 2, top + th / 2 + small.getTextSize() * 0.35f, small);
+                c.restore();
+            }
+            border.setColor(Color.rgb(17, 17, 17));
+            c.drawRoundRect(left, top, left + tw, top + th, 10 * density, 10 * density, border);
+            c.drawText(plate, left + strip + (tw - strip) / 2, top + th / 2 + chipText.getTextSize() * 0.35f, chipText);
             // green tick badge above the chip
             float br = 24 * density, by = cy - 28 * density;
             chip.setShadowLayer(0, 0, 0, 0);

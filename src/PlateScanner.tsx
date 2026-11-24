@@ -211,7 +211,7 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
             data = decode(context.getImageData(0, 0, width, height).data, width, height, { inversionAttempts: 'dontInvert' })?.data
           }
           if (!data || stopped) return
-          if (callbacks.current.onQr?.(data)) { stop(); return }
+          if (callbacks.current.onQr?.(data)) { try { navigator.vibrate?.(35) } catch { /* not supported */ } stop(); return }
           if (data === lastRejected) return
           lastRejected = data
           setQrNotice('That QR does not match a parking ticket. Try another ticket or scan the plate.')
@@ -292,6 +292,8 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
             }
             stop()
             setSuccess(result)
+            // a light buzz so the operator feels the read without looking (the Scan tap allows it)
+            try { navigator.vibrate?.(35) } catch { /* not supported */ }
             successTimer = setTimeout(() => callbacks.current.onRead(result), matchMedia('(prefers-reduced-motion: reduce)').matches ? 250 : 700)
             return
           }
@@ -392,14 +394,15 @@ function WebPlateScanner({ onRead, onClose, onQr }: {
           aria-label="Take a sharp photo of the plate" />}
         {cameraRatio > 0 && <div className={'plate-guide' + (success ? ' done' : plateBox ? ' found' : '')} aria-hidden="true">
           {capture === 'live' && !success && readerReady && <span className="plate-scanline" />}
-          <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
         </div>}
         {plateBox && !success && <div className="plate-box" aria-hidden="true" style={{
           left: `${plateBox.x * 100}%`, top: `${plateBox.y * 100}%`, width: `${plateBox.width * 100}%`, height: `${plateBox.height * 100}%`,
         }} />}
-        {success && <div className="plate-success" role="status">
+        {success && <div className={'plate-success' + (onQr ? ' exit' : '')} role="status">
           <span className="plate-success-tick"><Ico n="check" size={26} /></span>
-          <b>{prettyPlate(success.plate)}</b>
+          {onQr
+            ? <span className="plate-success-hsrp"><span className="ind">IND</span><b>{prettyPlate(success.plate)}</b></span>
+            : <b>{prettyPlate(success.plate)}</b>}
         </div>}
         {torch !== 'none' && capture === 'live' && !success && <button type="button" className={'plate-torch' + (torch === 'on' ? ' on' : '')} onClick={() => void toggleTorch()}
           aria-pressed={torch === 'on'}>{torch === 'on' ? 'Light on' : 'Light off'}</button>}
