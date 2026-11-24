@@ -22,7 +22,7 @@ import { alreadyInside, ticketCancelled } from './fx'
 function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
   const tv = db.tariffs.find(x => x.id === t.tariffId)
   const rt = tv?.rates[t.category]
-  const rates = tv && rt ? { v: tv.version, text: `${rupees(rt.firstPaise)} first ${rt.firstHours}h, ${rupees(rt.perHourPaise)} per started hour, ${tv.graceMin} min free, max ${rupees(rt.capPaise)} / 24h` } : null
+  const rates = tv && rt ? { v: tv.version, text: `${rupees(rt.firstPaise)} first ${rt.firstHours}h, ${rupees(rt.perHourPaise)} per started hour, ${tv.graceMin} min free${rt.capPaise ? `, max ${rupees(rt.capPaise)} / 24h` : ''}` } : null
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
@@ -83,7 +83,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
         <div className="slip-rules">
           <b>Rates (v{tv.version}, fixed for this ticket)</b><br />
           First {r.firstHours}h {rupees(r.firstPaise)} · then {rupees(r.perHourPaise)} per started hour ·
-          Free if you leave within {tv.graceMin} min · Max {rupees(r.capPaise)} per 24h.
+          Free if you leave within {tv.graceMin} min{r.capPaise ? ` · Max ${rupees(r.capPaise)} per 24h` : ''}.
           {t.prepaidHours > 0 && ' Prepaid time is not refunded; extra time is charged at exit.'}
           {' '}Final amount is worked out at exit.
         </div>
@@ -360,7 +360,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
       label.startsWith('First') ? `${cat?.name} · rates v${tv.version}, fixed at entry`
         : label.includes('extra hour') ? `Every started hour after ${rate.firstHours}h`
           : label.includes('grace') ? `Left within ${tv.graceMin} minutes`
-            : label.includes('full day') ? 'Each full day is charged at the 24-hour maximum'
+            : label.includes('full day') ? (rate.capPaise ? 'Each full day is charged at the 24-hour maximum' : 'Each full 24 hours at the normal rates')
               : label.startsWith('Daily cap') ? `Never more than ${rupees(rate.capPaise)} per 24 hours`
                 : label.startsWith('Free vehicle') ? 'On the owner\'s free list'
                   : label === 'Paid at entry' ? 'Paid when the vehicle came in'
@@ -384,7 +384,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
             <b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b>
           </div>)}
           <div className="rule-chips">
-            <span>{tv.graceMin} min free</span><span>Max {rupees(rate.capPaise)} / 24h</span>
+            <span>{tv.graceMin} min free</span>{rate.capPaise > 0 && <span>Max {rupees(rate.capPaise)} / 24h</span>}<span>After {rate.firstHours}h: {rupees(rate.perHourPaise)} / hour</span>
             <span>{t.onlineCheckout ? 'Amount locked for the UPI QR' : 'Checked again before payment'}</span>
           </div>
         </div>
@@ -497,7 +497,7 @@ export function Customer({ db, token }: { db: DB; token: string }) {
           <li>First {r.firstHours} hours: <b>{rupees(r.firstPaise)}</b></li>
           <li>Each started hour after that: <b>{rupees(r.perHourPaise)}</b></li>
           <li>Free if you leave within <b>{tv.graceMin} minutes</b></li>
-          <li>Maximum <b>{rupees(r.capPaise)}</b> per 24 hours</li>
+          {r.capPaise > 0 && <li>Maximum <b>{rupees(r.capPaise)}</b> per 24 hours</li>}
           {t.prepaidHours > 0 && <li>You prepaid {t.prepaidHours}h. No refund for leaving early; extra time is charged at exit.</li>}
         </ul>
         <p className="tiny muted">Rates are fixed at the time you entered (version {tv.version}). Example: in at 10:00, out at 11:20 → {rupees(charge(80, r, tv.graceMin).total)}.</p>

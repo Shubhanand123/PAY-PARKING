@@ -67,7 +67,8 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
   useEffect(() => {
     if (started.current) return
     started.current = true
-    if (linkOnly) void run(async () => { await callParkingPayment('switch-to-cash', { ticket_id: t.id }); throw new Error(NO_QR) })
+    // An old Razorpay payment link is open (its page asks for a mobile number): close it quietly and make a UPI QR instead.
+    if (linkOnly) void (async () => { const closed = await run(async () => { const r = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id }); onRevision(r.revision); return true }); if (closed) await create() })()
     else if (!order) void create()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
