@@ -68,6 +68,8 @@ html,body{background:var(--color-bg-page)}
 .slip-tot{font-size:15px;border-top:1px solid #111;margin-top:4px;padding-top:4px}
 .slip-rules{text-align:left;font-size:10.5px}
 .slip-qr{margin:10px 0 2px}
+.payment-qr-image{box-sizing:border-box;width:264px;max-width:100%;padding:12px;background:#fff;margin:12px auto;border-radius:8px}
+.payment-qr-image>*{display:block;max-width:100%;height:auto;aspect-ratio:1}
 
 /* exit */
 .tk-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}

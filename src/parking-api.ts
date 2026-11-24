@@ -19,7 +19,7 @@ export class ParkingApiError extends Error {
 
 export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'both' | 'owner'; version: number }
 let version = -1
-export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment'
+export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment' | 'switch-to-cash'
 type ParkingResponse = { snapshot?: Snapshot }
 
 async function requestParking<T extends ParkingResponse>(body: unknown, setupKey?: string, subroute?: PaymentEndpoint): Promise<T> {

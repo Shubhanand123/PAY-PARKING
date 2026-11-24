@@ -26,7 +26,7 @@ export type Settings = {
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
 export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
-export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number }
+export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number; linkUrl?: string }
 export type Ticket = {
   id: string            // human ticket number, e.g. T-000123
   token: string         // opaque QR token

@@ -365,9 +365,10 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
 type ParkingDevice = {
   id: string
   label: string
-  role: 'owner' | 'entry' | 'exit'
+  role: 'owner' | 'entry' | 'exit' | 'both'
   enabled: boolean
   current: boolean
+  pending: boolean
 }
 
 function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void }) {
@@ -376,6 +377,8 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [deviceName, setDeviceName] = useState('')
+  const [inviteLink, setInviteLink] = useState('')
 
   useEffect(() => {
     let active = true
@@ -389,23 +392,46 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
     setBusy(true)
     try {
       await callParking('deactivateDevice', [device.id])
-      setDevices(current => current?.map(item => item.id === device.id ? { ...item, enabled: false } : item))
+      setDevices(current => current?.map(item => item.id === device.id ? { ...item, enabled: false, pending: false } : item))
       setSelected(undefined)
       toast(`${device.label} deactivated`)
     } catch (failure) { toast((failure as Error).message, true) }
     finally { setBusy(false) }
   }
 
+  async function createDeviceLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy || !deviceName.trim()) return
+    setBusy(true)
+    setInviteLink('')
+    try {
+      const { result } = await callParking<{ code: string }>('issuePosDeviceLink', [deviceName.trim(), 'both'])
+      setInviteLink(location.href.split('#')[0] + '#/pair-pos/' + result.code)
+      setDeviceName('')
+      setRefresh(current => current + 1)
+    } catch (failure) { toast((failure as Error).message, true) }
+    finally { setBusy(false) }
+  }
+
   return <section className="card stack" aria-labelledby="devices-title">
     <h2 id="devices-title">Parking devices</h2>
-    <p className="muted small">Deactivate a lost or unused gate device here. Its current setup code will stop working.</p>
+    <form className="stack" onSubmit={event => void createDeviceLink(event)}>
+      <label className="setf"><span className="lbl">POS device name</span>
+        <input className="field small-field" maxLength={80} value={deviceName} onChange={event => setDeviceName(event.target.value)} placeholder="e.g. Main gate POS" required />
+      </label>
+      <button className="btn btn-primary" disabled={busy || !deviceName.trim()}>Create direct POS link</button>
+    </form>
+    {inviteLink && <div className="banner banner-info" role="status"><div className="stack">
+      <p>Open this one-time link on the POS machine within 30 minutes. The browser will remember access for entry and exit.</p>
+      <button className="btn btn-primary" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy POS link</button>
+    </div></div>}
     {error ? <div role="alert"><p>{error}</p><button className="btn btn-ghost fit" onClick={() => setRefresh(n => n + 1)}>Retry</button></div>
       : !devices ? <p role="status">Loading devices…</p>
       : devices.length === 0 ? <p>No devices have been registered.</p>
       : <ul className="device-list">{devices.map(device => <li key={device.id}>
-        <div><b>{device.label}</b><div className="muted small">{device.role === 'owner' ? 'Owner' : device.role === 'entry' ? 'Entry gate' : 'Exit gate'}{device.current ? ' · This browser' : ''}</div></div>
-        <Pill tone={device.enabled ? 'ok' : 'warn'}>{device.enabled ? 'Active' : 'Inactive'}</Pill>
-        {device.enabled && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>Deactivate</button>}
+        <div><b>{device.label}</b><div className="muted small">{device.role === 'owner' ? 'Owner' : device.role === 'both' ? 'Entry and exit' : device.role === 'entry' ? 'Entry gate' : 'Exit gate'}{device.current ? ' · This browser' : ''}</div></div>
+        <Pill tone={device.enabled ? 'ok' : 'warn'}>{device.enabled ? 'Active' : device.pending ? 'Pending setup' : 'Inactive'}</Pill>
+        {(device.enabled || device.pending) && device.role !== 'owner' && <button className="btn btn-ghost fit" disabled={busy} onClick={() => setSelected(device)}>{device.pending ? 'Cancel link' : 'Deactivate'}</button>}
       </li>)}</ul>}
     {selected && <div className="banner banner-warn" role="group" aria-label="Confirm deactivation">
       <div className="stack">

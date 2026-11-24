@@ -9,6 +9,17 @@ import { Owner } from './Owner'
 
 type View = 'entry' | 'exit' | 'owner'
 const route = () => location.hash.replace(/^#\/?/, '')
+let pairing: { code: string; request: Promise<void> } | undefined
+
+function openPairedPos(code: string) {
+  if (pairing?.code === code) return pairing.request
+  const request = callParking<{ key: string }>('pairPosDevice', [code], '').then(async ({ result }) => {
+    await auth?.auth.signOut({ scope: 'local' })
+    setDeviceKey(result.key)
+  })
+  pairing = { code, request }
+  return request
+}
 
 export default function App() {
   return apiEnabled ? <ConnectedApp /> : <LocalApp />
@@ -45,6 +56,12 @@ function ConnectedApp() {
     let active = true
     setError('')
     setCustomer(undefined)
+    if (r.startsWith('pair-pos/')) {
+      void openPairedPos(r.slice('pair-pos/'.length)).then(() => {
+        if (active) { setSnapshot(undefined); location.replace('#/entry') }
+      }).catch((failure: Error) => { if (active) setError(failure.message) })
+      return () => { active = false }
+    }
     const refresh = async () => {
       try {
         if (r.startsWith('t/')) {
@@ -90,6 +107,9 @@ function ConnectedApp() {
   if (r.startsWith('t/')) {
     return customer ? <ParkingApp db={customer} /> : <main className="content"><p role="status">{error || 'Loading ticket…'}</p></main>
   }
+  if (r.startsWith('pair-pos/')) {
+    return <main className="content"><p role={error ? 'alert' : 'status'}>{error || 'Opening POS…'}</p>{error && <a className="link" href="#/entry">Open parking app</a>}</main>
+  }
   if (snapshot && (sessionId || deviceKey())) {
     return <><ParkingApp db={snapshot.db} role={snapshot.role} signOut={signOut} /><div className="content">
       {error && <p role="alert">{error} Reconnect before collecting cash.</p>}
@@ -111,7 +131,7 @@ function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; si
   if (r.startsWith('t/')) return (
     <div className="screen">
       <header className="hero slim"><div className="glow g1" /><div className="hero-row"><div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.siteName}</div></div><h1>Your parking ticket</h1></header>
-      <main className="content"><Customer db={db} token={r.slice(2)} /><a className="link center" href="#/exit">Staff: open in gate app</a></main>
+      <main className="content"><Customer db={db} token={r.slice(2)} /></main>
     </div>
   )
 

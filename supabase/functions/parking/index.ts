@@ -1,6 +1,6 @@
 import {
-  createRazorpayOrder, fetchRazorpayPayment, findCapturedPayment, RazorpayServiceError,
-  razorpayOrderId, razorpayPaymentId, razorpaySignature, verifyRazorpaySignature,
+  cancelRazorpayLink, createRazorpayLink, createRazorpayOrder, fetchRazorpayLink, fetchRazorpayPayment, findCapturedPayment, RazorpayServiceError,
+  razorpayLinkId, razorpayOrderId, razorpayPaymentId, razorpaySignature, verifyRazorpaySignature,
 } from './razorpay.ts'
 import { loginAlias, pairedPassword } from '../../../src/parking-identity.ts'
 import * as parking from '../../../src/engine.ts'
@@ -210,10 +210,10 @@ async function saveState(db: parking.DB, version: number) {
   return saved
 }
 
-type PaymentRoute = 'create-order' | 'verify-payment' | 'check-payment'
+type PaymentRoute = 'create-order' | 'verify-payment' | 'check-payment' | 'switch-to-cash'
 
 function isPaymentRoute(value: unknown): value is PaymentRoute {
-  return value === 'create-order' || value === 'verify-payment' || value === 'check-payment'
+  return value === 'create-order' || value === 'verify-payment' || value === 'check-payment' || value === 'switch-to-cash'
 }
 
 async function paymentRoute(action: PaymentRoute, payload: Record<string, unknown>, actor?: { role: string; label?: string }) {
@@ -241,7 +241,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       if (fresh.onlineCheckout) {
         const order = fresh.onlineCheckout
         if (order.amount !== amount) return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
-        return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId })
+        return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId, link_url: order.linkUrl })
       }
       if (!actor) return reply({ error: 'Ask the exit attendant to enable online payment for this ticket.' }, 409)
       const billedAt = Date.now()
@@ -251,21 +251,58 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       }
       if (!providerOrder) {
         const receiptId = fresh.id + '-' + crypto.randomUUID().slice(0, 8)
-        const created = await createRazorpayOrder(razorpay, amount, currency, receiptId)
-        if (!razorpayOrderId.test(created.id) || created.amount !== amount || created.currency !== currency || created.receipt !== receiptId) {
-          throw new RazorpayServiceError('Razorpay returned an unexpected order.')
+        const quote = { amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } as const
+        if (payload.pos_qr === true) {
+          const link = await createRazorpayLink(razorpay, amount, receiptId, fresh.id)
+          if (!razorpayLinkId.test(link.id) || link.amount !== amount || link.currency !== currency || link.reference_id !== receiptId
+            || link.status !== 'created' || !/^https:\/\/(?:rzp\.io|razorpay\.com)\//.test(link.short_url)) {
+            throw new RazorpayServiceError('Razorpay returned an unexpected payment link.')
+          }
+          providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: link.id, linkUrl: link.short_url } }
+        } else {
+          const created = await createRazorpayOrder(razorpay, amount, currency, receiptId)
+          if (!razorpayOrderId.test(created.id) || created.amount !== amount || created.currency !== currency || created.receipt !== receiptId) {
+            throw new RazorpayServiceError('Razorpay returned an unexpected order.')
+          }
+          providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: created.id } }
         }
-        providerOrder = { revision: fresh.rev, checkout: { orderId: created.id, amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } }
       }
       fresh.onlineCheckout = providerOrder.checkout
       fresh.rev++
       const saved = await saveState(db, version)
-      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, snapshot: publishState(saved, actor.role) })
+      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, link_url: fresh.onlineCheckout.linkUrl, snapshot: publishState(saved, actor.role) })
     }
     return reply({ error: 'The ticket changed. Refresh and retry.' }, 409)
   }
 
   const order = ticket.onlineCheckout
+  if (action === 'switch-to-cash') {
+    if (!actor) return reply({ error: 'Gate access is required.' }, 403)
+    if (!order?.linkUrl || !razorpayLinkId.test(order.orderId) || ticket.status !== 'inside') {
+      return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
+    }
+    let link = await fetchRazorpayLink(razorpay, order.orderId)
+    if (link.status === 'created') {
+      try { link = await cancelRazorpayLink(razorpay, order.orderId) }
+      catch { link = await fetchRazorpayLink(razorpay, order.orderId) }
+    }
+    if (link.id !== order.orderId || link.amount !== order.amount || link.currency !== order.currency || link.reference_id !== order.receipt
+      || link.amount_paid !== 0 || link.payments?.length || !['cancelled', 'expired'].includes(link.status)) {
+      return reply({ error: 'Razorpay has not confirmed that the link is closed and unpaid. Check payment status before collecting cash.' }, 409)
+    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { db, version } = await state()
+      const fresh = select(db)
+      if (!fresh || fresh.status !== 'inside' || fresh.onlineCheckout?.orderId !== order.orderId) {
+        return reply({ error: 'The ticket changed. Reload it before collecting cash.' }, 409)
+      }
+      delete fresh.onlineCheckout
+      fresh.rev++
+      const saved = await saveState(db, version)
+      if (saved) return reply({ revision: fresh.rev, snapshot: publishState(saved, actor.role) })
+    }
+    return reply({ error: 'The ticket changed. Check it before collecting cash.' }, 409)
+  }
   if (action === 'verify-payment') {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = payload
     if (typeof razorpay_payment_id !== 'string' || !razorpayPaymentId.test(razorpay_payment_id)
@@ -278,12 +315,27 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
     }
   }
   if (!order) return reply({ error: 'This ticket has no online payment order.' }, 409)
-  const payment = action === 'verify-payment'
-    ? await fetchRazorpayPayment(razorpay, payload.razorpay_payment_id as string)
-    : await findCapturedPayment(razorpay, order.orderId)
+  let providerOrderId = order.orderId
+  let payment
+  if (action === 'verify-payment') {
+    payment = await fetchRazorpayPayment(razorpay, payload.razorpay_payment_id as string)
+  } else if (order.linkUrl && razorpayLinkId.test(order.orderId)) {
+    const link = await fetchRazorpayLink(razorpay, order.orderId)
+    if (link.id !== order.orderId || link.amount !== order.amount || link.currency !== order.currency || link.reference_id !== order.receipt) {
+      throw new RazorpayServiceError('Razorpay returned an unexpected payment link.')
+    }
+    const captured = link.payments?.find(item => item.status === 'captured')
+    if (link.status === 'paid' && link.amount_paid === order.amount && link.order_id && razorpayOrderId.test(link.order_id)
+      && captured && razorpayPaymentId.test(captured.payment_id)) {
+      providerOrderId = link.order_id
+      payment = await fetchRazorpayPayment(razorpay, captured.payment_id)
+    }
+  } else {
+    payment = await findCapturedPayment(razorpay, order.orderId)
+  }
   if (!payment || payment.status !== 'captured') return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
   if (!razorpayPaymentId.test(payment.id) || (action === 'verify-payment' && payment.id !== payload.razorpay_payment_id)
-    || payment.order_id !== order.orderId || payment.amount !== order.amount || payment.currency !== order.currency || (payment.amount_refunded ?? 0) !== 0) {
+    || payment.order_id !== providerOrderId || payment.amount !== order.amount || payment.currency !== order.currency || (payment.amount_refunded ?? 0) !== 0) {
     return reply({ error: 'Razorpay payment details did not match the parking order.' }, 400)
   }
 
@@ -330,10 +382,25 @@ Deno.serve(async request => {
     }
     if (action === 'redeemOwnerCode') return await redeemOwnerCode(args)
     if (action === 'redeemPosCode') return await redeemPosCode(args)
+    if (action === 'pairPosDevice') {
+      const [code] = args
+      if (typeof code !== 'string' || !/^[a-f0-9]{64}$/.test(code)) return reply({ error: 'Invalid POS setup link.' }, 400)
+      const key = randomToken()
+      const filter = new URLSearchParams({
+        key_hash: 'eq.' + await hashCode(code), role: 'in.(entry,exit,both)', enabled: 'eq.false',
+        pairing_expires_at: 'gt.' + new Date().toISOString(), select: 'id',
+      })
+      const [paired] = await database<Array<{ id: string }>>('parking_devices?' + filter, {
+        method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ key_hash: await hashCode(key), enabled: true, pairing_expires_at: null }),
+      })
+      return paired ? reply({ result: { key } }) : reply({ error: 'This POS setup link has expired or was already used.' }, 400)
+    }
     const authorization = request.headers.get('Authorization')
     let digest: string | undefined
     let signedIn: AuthUser | undefined
     let role: string
+    let deviceLabel: string | undefined
     if (authorization?.startsWith('Bearer ')) {
       const response = await authRequest('user', {}, authorization.slice(7))
       if (!response.ok) return reply({ error: 'Sign in again to continue.' }, 401)
@@ -360,12 +427,13 @@ Deno.serve(async request => {
       if (!/^[a-f0-9]{64}$/.test(key)) return reply({ error: 'Sign in to continue.' }, 401)
       const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)))
       digest = Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
-      const [device] = await database<Array<{ role: string }>>('parking_devices?enabled=eq.true&select=role&key_hash=eq.' + digest)
+      const [device] = await database<Array<{ role: string; label: string }>>('parking_devices?enabled=eq.true&select=role,label&key_hash=eq.' + digest)
       if (!device) return reply({ error: 'This setup code is invalid or revoked.' }, 401)
       role = device.role
+      deviceLabel = device.label
     }
 
-    if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label })
+    if (isPaymentRoute(action)) return await paymentRoute(action, body, { role, label: signedIn?.app_metadata?.parking_label ?? deviceLabel })
     if (action === 'issueOwnerCode') {
       if (role !== 'owner') return reply({ error: 'Only the owner can issue a recovery code.' }, 403)
       const [mobile] = args
@@ -431,20 +499,33 @@ Deno.serve(async request => {
       return reply({ result: { code, expiresAt } }, 201)
     }
 
-    if (action === 'listDevices' || action === 'deactivateDevice') {
+    if (action === 'listDevices' || action === 'deactivateDevice' || action === 'issuePosDeviceLink') {
       if (role !== 'owner') return reply({ error: 'Only an owner can manage devices.' }, 403)
+      if (action === 'issuePosDeviceLink') {
+        const [label, gate] = args
+        if (typeof label !== 'string' || !label.trim() || label.length > 80 || !isGate(gate)) return reply({ error: 'Enter a device name and choose its gate access.' }, 400)
+        const code = randomToken()
+        const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString()
+        await database('parking_devices', {
+          method: 'POST', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ key_hash: await hashCode(code), role: gate, label: label.trim(), enabled: false, pairing_expires_at: expiresAt }),
+        })
+        return reply({ result: { code, expiresAt } }, 201)
+      }
       if (action === 'listDevices') {
-        const rows = await database<Array<{ id: string; label: string; role: string; enabled: boolean; key_hash: string }>>(
-          'parking_devices?select=id,label,role,enabled,key_hash&order=role.asc,label.asc',
+        const rows = await database<Array<{ id: string; label: string; role: string; enabled: boolean; key_hash: string; pairing_expires_at: string | null }>>(
+          'parking_devices?select=id,label,role,enabled,key_hash,pairing_expires_at&order=role.asc,label.asc',
         )
-        return reply({ result: rows.map(({ key_hash, ...row }) => ({ ...row, current: key_hash === digest })) })
+        const now = new Date().toISOString()
+        return reply({ result: rows.filter(row => !row.pairing_expires_at || row.pairing_expires_at > now)
+          .map(({ key_hash, pairing_expires_at, ...row }) => ({ ...row, pending: Boolean(pairing_expires_at), current: key_hash === digest })) })
       }
       if (typeof args[0] !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(args[0])) {
         return reply({ error: 'Choose a valid gate device.' }, 400)
       }
       const changed = await database<Array<{ id: string }>>(
-        'parking_devices?select=id&enabled=eq.true&role=in.(entry,exit)&id=eq.' + args[0],
-        { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ enabled: false }) },
+        'parking_devices?select=id&or=(enabled.eq.true,pairing_expires_at.not.is.null)&role=in.(entry,exit,both)&id=eq.' + args[0],
+        { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ enabled: false, pairing_expires_at: null }) },
       )
       if (!changed.length) return reply({ error: 'This gate device is already inactive or unavailable.' }, 409)
       return reply({ result: true })
@@ -469,7 +550,7 @@ Deno.serve(async request => {
         : action !== 'createEntry'
       const staffId = role === 'owner' ? 'owner' : role === 'exit' || (role === 'both' && atExit) ? 'sunil' : 'ravi'
       const result = parking.runAction(db, staffId, (snapshot, staff) => {
-        const label = signedIn?.app_metadata?.parking_label
+        const label = signedIn?.app_metadata?.parking_label ?? deviceLabel
         return commandFn(snapshot, label ? { ...staff, name: label } : staff, ...args)
       })
       const saved = await saveState(db, version)

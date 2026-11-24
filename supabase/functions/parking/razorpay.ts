@@ -1,5 +1,9 @@
 export type RazorpayCredentials = { keyId: string; keySecret: string }
 export type RazorpayOrder = { id: string; amount: number; currency: string; receipt: string }
+type RazorpayLink = {
+  id: string; amount: number; amount_paid: number; currency: string; reference_id: string; short_url: string; status: string
+  order_id?: string; payments?: { payment_id: string; status: string }[] | null
+}
 export type RazorpayPayment = {
   id: string
   order_id: string
@@ -10,6 +14,7 @@ export type RazorpayPayment = {
 }
 
 export const razorpayOrderId = /^order_[A-Za-z0-9]+$/
+export const razorpayLinkId = /^plink_[A-Za-z0-9]+$/
 export const razorpayPaymentId = /^pay_[A-Za-z0-9]+$/
 export const razorpaySignature = /^[a-f0-9]{64}$/i
 
@@ -35,6 +40,23 @@ async function request<T>(credentials: RazorpayCredentials, path: string, body?:
 
 export function createRazorpayOrder(credentials: RazorpayCredentials, amount: number, currency: 'INR', receipt: string) {
   return request<RazorpayOrder>(credentials, 'orders', { amount, currency, receipt })
+}
+
+export function createRazorpayLink(credentials: RazorpayCredentials, amount: number, referenceId: string, ticketId: string) {
+  return request<RazorpayLink>(credentials, 'payment_links', {
+    amount, currency: 'INR', reference_id: referenceId, description: 'Parking ticket ' + ticketId,
+    upi_link: credentials.keyId.startsWith('rzp_live_'), accept_partial: false,
+    notify: { sms: false, email: false }, reminder_enable: false,
+    expire_by: Math.floor(Date.now() / 1000) + 1800,
+  })
+}
+
+export function fetchRazorpayLink(credentials: RazorpayCredentials, linkId: string) {
+  return request<RazorpayLink>(credentials, 'payment_links/' + linkId)
+}
+
+export function cancelRazorpayLink(credentials: RazorpayCredentials, linkId: string) {
+  return request<RazorpayLink>(credentials, 'payment_links/' + linkId + '/cancel', {})
 }
 
 export function fetchRazorpayPayment(credentials: RazorpayCredentials, paymentId: string) {
