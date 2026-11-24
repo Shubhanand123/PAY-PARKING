@@ -337,7 +337,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
 
     // Q9: pay by UPI QR. Stays on screen until the "received" moment has played, then the receipt opens.
     if (paying && (t.status === 'inside' || t.status === 'paid')) return (
-      <PosPay t={t} amount={t.status === 'inside' ? b.duePaise : (t.totalPaise ?? b.totalPaise) - b.prepaidPaise} vehicle={cat?.name ?? ''} paid={t.status === 'paid'}
+      <PosPay t={t} amount={t.status === 'inside' ? b.duePaise : (t.totalPaise ?? b.totalPaise) - b.prepaidPaise} vehicle={cat?.name ?? ''} lines={b.lines} paid={t.status === 'paid'}
         onRevision={setRev} onDone={() => setPaying(false)} onCash={() => setPaying(false)} onBack={() => setPaying(false)} />
     )
 

@@ -15,10 +15,11 @@ const VALID_MS = 30 * 60_000 // Razorpay closes the QR after 30 minutes (close_b
  * Q9 "Scan & pay" at the exit gate: Razorpay's single-use UPI QR for the exact amount, a 30-minute timer,
  * an automatic payment check every 3 s, a chime when the money arrives, and Make new QR once it expires.
  */
-export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, onBack }: {
+export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDone, onCash, onBack }: {
   t: Ticket
   amount: number
   vehicle: string
+  lines?: { label: string; paise: number }[]  // the bill, shown above the QR (design 7)
   paid: boolean
   onRevision: (revision: number) => void
   onDone: () => void      // payment received and shown: open the receipt
@@ -120,12 +121,11 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
         <button className="btn btn-ghost" disabled={busy} onClick={onBack}><Ico n="back" size={18} /> Back to bill</button>
         <button className="btn btn-ghost danger-text" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="x" size={16} /> Cancel QR</button>
       </div>}
-      <div className="q9-due">
-        <div><span className="q9-lab">Amount due</span><b className="q9-amt num">{rupees(amount)}</b></div>
-        <div className="q9-veh">
-          <span className="ind-plate sm"><i />{prettyPlate(t.plate)}</span>
-          <small>{vehicle} · {dur(now - t.entryAt)} · {t.id}</small>
-        </div>
+      {/* Design 7: a short bill above the QR, so the customer sees why they pay this amount */}
+      <div className="q9-bill">
+        <div className="q9-bh"><span className="hsrp"><i />{prettyPlate(t.plate)}</span><small>{vehicle} · {dur(now - t.entryAt)}</small></div>
+        {lines.filter(l => l.paise !== 0 || lines.length === 1).map((l, i) => <div key={i} className="q9-bl"><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
+        <div className="q9-bl q9-bt"><span>Total</span><b className="num">{rupees(amount)}</b></div>
       </div>
 
       <div className="q9-card">
@@ -146,14 +146,11 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
             <button className="link" disabled={busy} onClick={() => void check()}>Check payment</button>
           </div>}
         </div>
-        <div className="q9-timer">
-          <div className="q9-tl"><span>QR valid for</span><b className="num">{code?.text ? `${mm}:${ss}` : '–'}</b></div>
-          <div className="q9-bar"><i style={{ transform: `scaleX(${code?.text ? left / VALID_MS : 0})` }} /></div>
-        </div>
+        <p className="q9-note">Scan with any UPI app{code?.text ? <> · valid <b className="num">{mm}:{ss}</b></> : ''}</p>
       </div>
 
       <p className={'q9-status ' + state} role="status">
-        {state === 'paid' ? 'Payment received' : state === 'expired' ? 'QR expired' : state === 'making' ? 'Getting the QR ready' : <><span className="q9-dots"><i /><i /><i /></span>Waiting for payment · scan with any UPI app</>}
+        {state === 'paid' ? 'Payment received' : state === 'expired' ? 'QR expired' : state === 'making' ? 'Getting the QR ready' : <><span className="q9-dots"><i /><i /><i /></span>Waiting for payment</>}
       </p>
 
       <div className="q9-actions">
