@@ -262,7 +262,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         </div>}
         {stale && t.status !== 'cancelled' && <div className="banner banner-warn"><Ico n="warn" /><div>This ticket was changed on another device. <button className="link" onClick={() => setRev(t.rev)}>Reload</button></div></div>}
         {t.status === 'inside' && db.razorpayEnabled && b.duePaise >= 100 && (!stale || t.onlineCheckout) &&
-          <RazorpayCheckout key={t.id} ticketId={t.id} token={t.token} amount={b.duePaise} name={db.settings.operator} hasOrder={Boolean(t.onlineCheckout)} linkUrl={t.onlineCheckout?.linkUrl} pos onRevision={setRev} />}
+          <RazorpayCheckout key={t.id} ticketId={t.id} token={t.token} amount={b.duePaise} name={db.settings.operator} hasOrder={Boolean(t.onlineCheckout)} linkUrl={t.onlineCheckout?.linkUrl} upiQr={t.onlineCheckout?.upiQr} qrImage={t.onlineCheckout?.qrImage} test={db.razorpayTest} pos onRevision={setRev} />}
         {t.status === 'inside' && !stale && !t.onlineCheckout && <div className="actionbar"><button className={'btn btn-xl ' + (b.duePaise ? 'btn-primary' : 'btn-success')} disabled={busy} onClick={() => act(b.duePaise ? '' : 'Done', async () => { const r = await takeCash(me.id, t.id, rev, b.duePaise); setRev(r.rev); if (b.duePaise) cashCelebrate(b.duePaise, prettyPlate(t.plate)) })}>
           {b.duePaise ? <><Ico n="cash" size={24} /> Cash received {rupees(b.duePaise)}</> : <><Ico n="check" size={24} /> Nothing due · Continue</>}
         </button></div>}
@@ -358,7 +358,7 @@ export function Customer({ db, token }: { db: DB; token: string }) {
           <div className="muted small">{t.onlineCheckout ? 'Amount to pay' : 'Estimate if you leave now'}</div>
           <div className="amount">{rupees(b.duePaise)}</div>
           {db.razorpayEnabled && t.onlineCheckout
-            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={db.settings.operator} hasOrder linkUrl={t.onlineCheckout.linkUrl} />
+            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={db.settings.operator} hasOrder linkUrl={t.onlineCheckout.linkUrl} upiQr={t.onlineCheckout.upiQr} qrImage={t.onlineCheckout.qrImage} />
             : <p className="tiny muted">{db.razorpayEnabled ? 'Ask the exit attendant to enable online payment when you are ready to leave.' : 'Pay the attendant at the exit gate.'}</p>}
         </>}
         {(t.status === 'paid' || t.status === 'exited') && <><div className="muted small">Paid</div><div className="amount ok">{rupees(t.totalPaise ?? 0)}</div></>}

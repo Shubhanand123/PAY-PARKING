@@ -16,6 +16,7 @@ export type RazorpayPayment = {
 export const razorpayOrderId = /^order_[A-Za-z0-9]+$/
 export const razorpayLinkId = /^plink_[A-Za-z0-9]+$/
 export const razorpayPaymentId = /^pay_[A-Za-z0-9]+$/
+export const razorpayQrId = /^qr_[A-Za-z0-9]+$/
 export const razorpaySignature = /^[a-f0-9]{64}$/i
 
 export class RazorpayServiceError extends Error {}
@@ -57,6 +58,25 @@ export function fetchRazorpayLink(credentials: RazorpayCredentials, linkId: stri
 
 export function cancelRazorpayLink(credentials: RazorpayCredentials, linkId: string) {
   return request<RazorpayLink>(credentials, 'payment_links/' + linkId + '/cancel', {})
+}
+
+type RazorpayQr = { id: string; status: string; payment_amount: number; image_content?: string; image_url?: string }
+
+/** Single-use UPI QR for an exact amount. Any UPI app can pay it (live mode only; test-mode QRs cannot be paid from real apps). */
+export function createRazorpayQr(credentials: RazorpayCredentials, amount: number, ticketId: string) {
+  return request<RazorpayQr>(credentials, 'payments/qr_codes', {
+    type: 'upi_qr', name: 'Parking', usage: 'single_use', fixed_amount: true, payment_amount: amount,
+    description: 'Parking ticket ' + ticketId, close_by: Math.floor(Date.now() / 1000) + 1800,
+  })
+}
+
+export async function capturedQrPayment(credentials: RazorpayCredentials, qrId: string, amount: number) {
+  const payments = await request<{ items: RazorpayPayment[] }>(credentials, 'payments/qr_codes/' + qrId + '/payments')
+  return payments.items.find(payment => payment.status === 'captured' && payment.amount === amount)
+}
+
+export async function closeRazorpayQr(credentials: RazorpayCredentials, qrId: string) {
+  try { await request<RazorpayQr>(credentials, 'payments/qr_codes/' + qrId + '/close', {}) } catch { /* already closed or expired */ }
 }
 
 export function fetchRazorpayPayment(credentials: RazorpayCredentials, paymentId: string) {

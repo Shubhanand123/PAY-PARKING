@@ -26,7 +26,10 @@ export type Settings = {
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
 export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
-export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number; linkUrl?: string }
+export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number; linkUrl?: string
+  upiQr?: string    // Razorpay UPI QR content (upi://pay?...), shown big on the POS
+  qrImage?: string  // Razorpay's own QR image, used if upiQr is missing
+}
 export type Ticket = {
   id: string            // human ticket number, e.g. T-000123
   token: string         // opaque QR token
@@ -50,6 +53,7 @@ export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticke
 
 export type DB = {
   razorpayEnabled?: boolean
+  razorpayTest?: boolean
   seq: number
   staff: Staff[]
   categories: Category[]

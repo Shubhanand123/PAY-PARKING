@@ -1,4 +1,5 @@
 import {
+  capturedQrPayment, closeRazorpayQr, createRazorpayQr, razorpayQrId,
   cancelRazorpayLink, createRazorpayLink, createRazorpayOrder, fetchRazorpayLink, fetchRazorpayPayment, findCapturedPayment, RazorpayServiceError,
   razorpayLinkId, razorpayOrderId, razorpayPaymentId, razorpaySignature, verifyRazorpaySignature,
 } from './razorpay.ts'
@@ -200,7 +201,7 @@ async function state() {
 }
 
 function publishState(current: State, role: string) {
-  return { ...current, role, db: { ...current.db, razorpayEnabled: Boolean(razorpay) } }
+  return { ...current, role, db: { ...current.db, razorpayEnabled: Boolean(razorpay), razorpayTest: Boolean(razorpay?.keyId.startsWith('rzp_test_')) } }
 }
 
 async function saveState(db: parking.DB, version: number) {
@@ -243,7 +244,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       if (fresh.onlineCheckout) {
         const order = fresh.onlineCheckout
         if (order.amount !== amount) return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
-        return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId, link_url: order.linkUrl })
+        return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId, link_url: order.linkUrl, upi_qr: order.upiQr, qr_image: order.qrImage })
       }
       if (!actor) return reply({ error: 'Ask the exit attendant to enable online payment for this ticket.' }, 409)
       const billedAt = Date.now()
@@ -254,7 +255,13 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       if (!providerOrder) {
         const receiptId = fresh.id + '-' + crypto.randomUUID().slice(0, 8)
         const quote = { amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } as const
-        if (payload.pos_qr === true) {
+        if (payload.upi_qr === true) {
+          const qr = await createRazorpayQr(razorpay, amount, fresh.id)
+          if (!razorpayQrId.test(qr.id) || qr.payment_amount !== amount || qr.status !== 'active' || !(qr.image_content || qr.image_url)) {
+            throw new RazorpayServiceError('Razorpay returned an unexpected QR code.')
+          }
+          providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: qr.id, upiQr: qr.image_content, qrImage: qr.image_url } }
+        } else if (payload.pos_qr === true) {
           const link = await createRazorpayLink(razorpay, amount, receiptId, fresh.id)
           if (!razorpayLinkId.test(link.id) || link.amount !== amount || link.currency !== currency || link.reference_id !== receiptId
             || link.status !== 'created' || !/^https:\/\/(?:rzp\.io|razorpay\.com)\//.test(link.short_url)) {
@@ -272,7 +279,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       fresh.onlineCheckout = providerOrder.checkout
       fresh.rev++
       const saved = await saveState(db, version)
-      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, link_url: fresh.onlineCheckout.linkUrl, snapshot: publishState(saved, actor.role) })
+      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, link_url: fresh.onlineCheckout.linkUrl, upi_qr: fresh.onlineCheckout.upiQr, qr_image: fresh.onlineCheckout.qrImage, snapshot: publishState(saved, actor.role) })
     }
     return reply({ error: 'The ticket changed. Refresh and retry.' }, 409)
   }
@@ -283,7 +290,13 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
     if (!order || ticket.status !== 'inside') {
       return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
     }
-    if (!order.linkUrl) {
+    if (razorpayQrId.test(order.orderId)) {
+      // UPI QR: close it so it can't be paid any more, then make sure nothing was paid before it closed.
+      await closeRazorpayQr(razorpay, order.orderId)
+      if (await capturedQrPayment(razorpay, order.orderId, order.amount)) {
+        return reply({ error: 'The customer already paid this QR. Tap Check payment status.' }, 409)
+      }
+    } else if (!order.linkUrl) {
       // Checkout order (Razorpay window): allowed only if Razorpay has no captured payment for it.
       if (!razorpayOrderId.test(order.orderId)) return reply({ error: 'This payment cannot switch to cash. Check payment status first.' }, 409)
       if (await findCapturedPayment(razorpay, order.orderId)) {
@@ -330,6 +343,9 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   let payment
   if (action === 'verify-payment') {
     payment = await fetchRazorpayPayment(razorpay, payload.razorpay_payment_id as string)
+  } else if (razorpayQrId.test(order.orderId)) {
+    const captured = await capturedQrPayment(razorpay, order.orderId, order.amount)
+    if (captured) { payment = captured; providerOrderId = captured.order_id }
   } else if (order.linkUrl && razorpayLinkId.test(order.orderId)) {
     const link = await fetchRazorpayLink(razorpay, order.orderId)
     if (link.id !== order.orderId || link.amount !== order.amount || link.currency !== order.currency || link.reference_id !== order.receipt) {
