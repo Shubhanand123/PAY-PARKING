@@ -6,4 +6,5 @@ import './app.css'
 import './done.css'
 import './fx.css'
 import App from './App'
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
+import { AppUpdate } from './AppUpdate'
+createRoot(document.getElementById('root')!).render(<StrictMode><AppUpdate /><App /></StrictMode>)

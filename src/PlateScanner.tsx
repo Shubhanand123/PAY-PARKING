@@ -4,6 +4,7 @@ import { prettyPlate } from './engine'
 import { plateFromText, rankPlateFrames, type PlateReading } from './plate-reading'
 import { cropGray, estimateSkew, findRowSplit, locatePlate, otsu, textBlock, toGray, type Box } from './plate-locate'
 import { Ico } from './ui'
+import { nativeApp, nativeScan } from './native'
 
 export type ScanResult = PlateReading & { alternatives: string[] }
 
@@ -136,7 +137,7 @@ async function grabStill(track: MediaStreamTrack, preview: HTMLVideoElement): Pr
   return createImageBitmap(preview)
 }
 
-export function PlateScanner({ onRead, onClose, onQr }: {
+function WebPlateScanner({ onRead, onClose, onQr }: {
   onRead: (result: ScanResult) => void
   onClose: () => void
   onQr?: (data: string) => boolean
@@ -400,4 +401,29 @@ export function PlateScanner({ onRead, onClose, onQr }: {
       <button className="btn btn-ghost" onClick={onClose}>Enter manually</button>
     </div>
   </dialog>
+}
+
+type ScannerProps = { onRead: (result: ScanResult) => void; onClose: () => void; onQr?: (data: string) => boolean }
+
+// Android app: hand over to the native ML Kit scanner screen and pass its answer back to the form.
+function NativePlateScanner({ onRead, onClose, onQr }: ScannerProps) {
+  const callbacks = useRef({ onRead, onClose, onQr })
+  useEffect(() => { callbacks.current = { onRead, onClose, onQr } }, [onRead, onClose, onQr])
+  useEffect(() => {
+    let alive = true
+    const { onQr: readsQr } = callbacks.current
+    nativeScan(Boolean(readsQr), readsQr ? 'Scan ticket or plate' : 'Scan plate').then(result => {
+      if (!alive) return
+      const { onRead, onClose, onQr } = callbacks.current
+      if (result.qr !== undefined) { if (!onQr?.(result.qr)) onClose(); return }
+      if (result.plate) onRead({ plate: result.plate, confidence: .9, alternatives: result.alternatives ?? [] })
+      else onClose()
+    }).catch(() => { if (alive) callbacks.current.onClose() })
+    return () => { alive = false }
+  }, [])
+  return null
+}
+
+export function PlateScanner(props: ScannerProps) {
+  return nativeApp ? <NativePlateScanner {...props} /> : <WebPlateScanner {...props} />
 }

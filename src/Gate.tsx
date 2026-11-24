@@ -3,6 +3,7 @@ import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
 import { createWedgeReader } from './scanner-wedge'
+import { nativeApp } from './native'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -62,7 +63,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
 
 // ---------- entry ----------
 export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
-  useEffect(() => { void warmPlateReader().catch(() => {}) }, [])
+  useEffect(() => { if (!nativeApp) void warmPlateReader().catch(() => {}) }, [])
   const [plate, setPlate] = useState('')
   const [conf, setConf] = useState<number | null>(null)
   const [cat, setCat] = useState('')
@@ -183,7 +184,7 @@ export function Entry({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
 // ---------- exit ----------
 export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   useEffect(() => {
-    void warmPlateReader().catch(() => {})
+    if (!nativeApp) void warmPlateReader().catch(() => {})
     void import('jsqr').catch(() => {})
   }, [])
   const [q, setQ] = useState('')
