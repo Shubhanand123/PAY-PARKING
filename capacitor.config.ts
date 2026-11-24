@@ -4,7 +4,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 // Only the native plate reader (ML Kit) ships inside the APK.
 const config: CapacitorConfig = {
   appId: 'com.saiexpress.payparking',
-  appName: 'PARKAR',
+  appName: 'PARKER',
   webDir: 'dist',
   // CAP_BUNDLED=1 builds a test APK that carries this branch's site instead of loading the live one.
   server: process.env.CAP_BUNDLED ? { androidScheme: 'https' } : {

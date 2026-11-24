@@ -216,7 +216,7 @@ function ConnectedApp() {
   }
   if (r === 'owner') return <Login onOwnerSetup={activateOwner} error={error} />
   return <div className="screen">
-    <header className="hero compact"><div className="hero-row"><span className="brand"><span className="brand-mark"><Ico n="p" /></span>PARKAR</span></div><h1>Gate POS</h1></header>
+    <header className="hero compact"><div className="hero-row"><span className="brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span></div><h1>Gate POS</h1></header>
     <main className="content"><section className="card stack">
       <p>{error || 'Open your direct POS link on this machine to start.'}</p>
       <a className="link" href="#/owner">Owner dashboard</a>
@@ -252,7 +252,7 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
       {gate ? <GateHeader view={view} routes={routes} flow={flow} offline={offline} /> : <header className="hero">
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
-          <div className="brand"><span className="brand-logo"><img src="skc.png" alt="SKC" /></span>PARKAR</div>
+          <div className="brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></div>
           {signOut ? <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         <h1>Owner dashboard</h1>
@@ -285,8 +285,7 @@ function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[
   return (
     <header className={'gh gh-' + view}>
       <div className="gh-row">
-        <span className="gh-mark"><img src="skc.png" alt="SKC" /></span>
-        <b className="gh-name">PARKAR</b>
+        <span className="gh-brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span>
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (net ? ' off' : waiting ? ' wait' : '')}><i />{net ? 'Offline' : waiting ? 'Sending' : 'Online'}{waiting > 0 && <b className="num"> · {waiting}</b>}</span>
       </div>
@@ -306,12 +305,12 @@ function PosSetup({ error }: { error: string }) {
   const [msg, setMsg] = useState('')
   const use = (value: string) => {
     const m = /#\/((?:pos|pair-pos)\/[a-f0-9]{64})/i.exec(value.trim()) ?? /^((?:pos|pair-pos)\/[a-f0-9]{64})$/i.exec(value.trim())
-    if (!m) { setMsg('That is not a PARKAR POS setup code. Use the QR from Owner dashboard → Devices.'); return false }
+    if (!m) { setMsg('That is not a PARKER POS setup code. Use the QR from Owner dashboard → Devices.'); return false }
     location.hash = '/' + m[1]
     return true
   }
   return <div className="screen">
-    <header className="gh gh-entry"><div className="gh-row"><span className="gh-mark"><img src="skc.png" alt="SKC" /></span><b className="gh-name">PARKAR</b></div></header>
+    <header className="gh gh-entry"><div className="gh-row"><span className="gh-brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span></div></header>
     <main className="content"><section className="card stack pos-setup">
       <h2>Set up this POS</h2>
       <p className="muted small">{nativeApp ? 'This app works only on a POS added by the Owner.' : 'The gates are locked to approved POS machines.'} On your phone, open the Owner dashboard → <b>POS devices</b>, add this POS, then scan its setup QR here. After that it opens straight to Entry and Exit, with no code or PIN, until the Owner removes it.</p>

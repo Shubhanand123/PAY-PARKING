@@ -5,7 +5,7 @@ import { nativeApp, PlateReader } from './native'
 export async function printSlip() {
   await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 150))) // let the slip render first
   if (nativeApp) {
-    try { await PlateReader.print({ name: 'PARKAR' }); return } catch { /* fall back to the browser */ }
+    try { await PlateReader.print({ name: 'PARKER' }); return } catch { /* fall back to the browser */ }
   }
   window.print()
 }

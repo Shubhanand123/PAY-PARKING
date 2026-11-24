@@ -467,7 +467,7 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
 
   return <section className="card stack" aria-labelledby="devices-title">
     <h2 id="devices-title">POS machines</h2>
-    <p className="muted small">Add each POS once. Then, on that POS, open PARKAR and tap <b>Scan setup QR</b> (or open the link on it). Its offline tickets and any problems show under this name.</p>
+    <p className="muted small">Add each POS once. Then, on that POS, open PARKER and tap <b>Scan setup QR</b> (or open the link on it). Its offline tickets and any problems show under this name.</p>
     <form className="stack" onSubmit={event => void createDeviceLink(event)}>
       <label className="setf"><span className="lbl">POS name</span>
         <input className="field small-field" maxLength={80} value={deviceName} onChange={event => setDeviceName(event.target.value)} placeholder="e.g. Gate 1 Entry" required />
@@ -481,7 +481,7 @@ function DevicesTab({ toast }: { toast: (message: string, bad?: boolean) => void
     </form>
     {inviteLink && <div className="banner banner-info pos-invite" role="status"><div className="stack">
       <b>Setup QR for {inviteName}</b>
-      <p className="small">On that POS: open PARKAR → <b>Scan setup QR</b> and point it here. This QR is private: it gives gate access until you remove the POS below.</p>
+      <p className="small">On that POS: open PARKER → <b>Scan setup QR</b> and point it here. This QR is private: it gives gate access until you remove the POS below.</p>
       <div className="pos-qr"><QR text={inviteLink} size={220} /></div>
       <button className="btn btn-ghost" onClick={() => void navigator.clipboard.writeText(inviteLink).then(() => toast('POS link copied'), () => toast('Could not copy the POS link', true))}>Copy setup link instead</button>
       <button className="btn btn-ghost" onClick={() => setInviteLink('')}>Done</button>
