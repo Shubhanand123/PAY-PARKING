@@ -43,6 +43,7 @@ export type Ticket = {
   status: Status
   exitGate?: string; exitBy?: string; exitAt?: number
   onlineCheckout?: OnlineCheckout
+  upiCheck?: { orderId: string; amount: number; at: number; by: string; flagged?: boolean }  // UPI confirmed by the operator; waiting for Razorpay
   billedAt?: number     // time the exit bill was locked
   totalPaise?: number   // full charge for the stay
   cancelledBy?: string; cancelledAt?: number; cancelReason?: string
@@ -412,6 +413,15 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
 export function settleOnlinePayment(db: DB, staff: Staff, ticket: Ticket, orderId: string, paymentId: string) {
   const order = ticket.onlineCheckout
   if (!order || order.orderId !== orderId) throw new Refused('The payment does not match this ticket.')
+  // The operator already confirmed this UPI payment: Razorpay's confirmation just completes the record.
+  if (ticket.upiCheck && ticket.upiCheck.orderId === orderId && (ticket.status === 'paid' || ticket.status === 'exited')) {
+    const pending = db.payments.find(p => p.ticketId === ticket.id && p.method === 'razorpay' && !p.providerPaymentId)
+    if (pending) pending.providerPaymentId = paymentId
+    delete ticket.upiCheck
+    ticket.rev++
+    log(db, staff, 'payment', `Razorpay confirmed the UPI payment of ${rupees(order.amount)}`, ticket.id, 0)
+    return ticket
+  }
   const previous = db.payments.find(payment => payment.providerPaymentId === paymentId)
   if (previous?.ticketId === ticket.id && (ticket.status === 'paid' || ticket.status === 'exited')) return ticket
   if (previous || ticket.status !== 'inside') throw new Refused('This ticket cannot accept another payment.')
@@ -427,6 +437,23 @@ export function settleOnlinePayment(db: DB, staff: Staff, ticket: Ticket, orderI
   ticket.receipt = makeReceipt(db, ticket, staff.name)
   log(db, staff, 'payment', `Razorpay ${rupees(order.amount)} received`, ticket.id, order.amount)
   return ticket
+}
+
+/** The operator saw the customer's UPI app say "paid": complete the exit now; the server confirms with Razorpay in the background. */
+export const confirmUpiByOperator = (db: DB, s: Staff, id: string, rev: number) => {
+  const t = db.tickets.find(x => x.id === id)
+  if (!t) throw new Refused('Ticket not found.')
+  if (t.status !== 'inside') throw new Refused(t.status === 'paid' ? 'Already paid.' : `Ticket is ${t.status}.`)
+  const order = t.onlineCheckout
+  if (!order) throw new Refused('There is no UPI QR open for this ticket.')
+  if (t.rev !== rev) throw new Refused('This ticket changed on another device. Reload it.')
+  const now = Date.now()
+  addPayment(db, t, order.amount, s.id, now, 'exit', 'razorpay').by = s.name
+  t.upiCheck = { orderId: order.orderId, amount: order.amount, at: now, by: s.name }
+  t.status = 'paid'; t.billedAt = order.billedAt; t.totalPaise = order.totalPaise; t.rev++
+  t.receipt = makeReceipt(db, t, s.name)
+  log(db, s, 'payment', `UPI ${rupees(order.amount)} confirmed by the operator (customer's app showed paid) · Razorpay confirms in the background`, id, order.amount)
+  return t
 }
 
 export const recordExit = (db: DB, s: Staff, id: string) => {

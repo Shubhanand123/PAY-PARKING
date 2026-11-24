@@ -57,6 +57,7 @@ export const markPrinted = action('markPrinted', engine.markPrinted, offlineTick
 export const logLookup = action('logLookup', engine.logLookup, () => undefined as never)
 export const takeCash = action('takeCash', engine.takeCash, offlineTicket('cash') as never)
 export const recordExit = action('recordExit', engine.recordExit, offlineTicket('exit') as never)
+export const confirmUpi = action('confirmUpi', engine.confirmUpiByOperator)
 export const cancelTicket = action('cancelTicket', engine.cancelTicket)
 export const publishTariff = action('publishTariff', engine.publishTariff)
 export const saveSettings = action('saveSettings', engine.saveSettings)

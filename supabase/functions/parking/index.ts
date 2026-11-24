@@ -153,6 +153,7 @@ const actions = {
   markPrinted: { roles: ['entry', 'exit', 'owner'], fn: parking.markPrinted, checks: ['text', 'printKind'] },
   logLookup: { roles: ['exit', 'owner'], fn: parking.logLookup, checks: ['text', 'lookup'] },
   takeCash: { roles: ['exit', 'owner'], fn: parking.takeCash, checks: ['text', 'integer', 'integer'] },
+  confirmUpi: { roles: ['exit', 'owner'], fn: parking.confirmUpiByOperator, checks: ['text', 'integer'] },
   recordExit: { roles: ['exit', 'owner'], fn: parking.recordExit, checks: ['text'] },
   cancelTicket: { roles: ['exit', 'owner'], fn: parking.cancelTicket, checks: ['text', 'text'] },
   publishTariff: { roles: ['owner'], fn: parking.publishTariff, checks: ['integer', 'rates', 'text'] },
@@ -413,6 +414,28 @@ async function hmacHex(secret: string, message: string) {
   return hex(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message))))
 }
 
+/** UPI payments the operator confirmed: complete them when Razorpay confirms; flag them if Razorpay never does. */
+async function reconcileUpi(onlyQr?: string) {
+  if (!razorpay) return
+  const { db, version } = await state()
+  const pending = db.tickets.filter(t => t.upiCheck && t.onlineCheckout && (!onlyQr || t.upiCheck.orderId === onlyQr))
+  if (!pending.length) return
+  let changed = false
+  const staff = db.staff.find(person => person.id === 'sunil')!
+  for (const t of pending) {
+    const order = t.onlineCheckout!
+    const payment = await capturedQrPayment(razorpay, order.orderId, order.amount).catch(() => undefined)
+    if (payment) { parking.settleOnlinePayment(db, { ...staff, name: 'Razorpay' }, t, order.orderId, payment.id); changed = true; console.log('UPI reconciled: ' + t.id + ' ' + payment.id) }
+    else if (Date.now() - t.upiCheck!.at > 30 * 60_000 && !t.upiCheck!.flagged) {
+      t.upiCheck!.flagged = true
+      db.offlineIssues = [...(db.offlineIssues ?? []), { at: Date.now(), opId: 'upi-' + t.id, ticketId: t.id, device: t.upiCheck!.by,
+        text: `${parking.prettyPlate(t.plate)}: UPI ${parking.rupees(order.amount)} was marked paid by ${t.upiCheck!.by} at the gate, but Razorpay has not received it after 30 minutes. Check the customer's payment.` }].slice(-500)
+      changed = true
+    }
+  }
+  if (changed) await saveState(db, version)
+}
+
 async function razorpayWebhook(request: Request, raw: string, body: Record<string, unknown>) {
   console.log('Razorpay webhook received: ' + String(body?.event))
   const secret = Deno.env.get('RAZORPAY_WEBHOOK_SECRET')
@@ -422,6 +445,7 @@ async function razorpayWebhook(request: Request, raw: string, body: Record<strin
   const qrId = (payload.qr_code?.entity?.id ?? (payload.payment?.entity?.notes as Record<string, unknown> | undefined)?.qr_code_id) as string | undefined
   if (typeof qrId !== 'string' || !razorpayQrId.test(qrId)) return reply({ ok: true, ignored: true })
   const { db } = await state()
+  if (db.tickets.some(t => t.upiCheck?.orderId === qrId)) { await reconcileUpi(qrId); return reply({ ok: true, status: 'reconciled' }) }
   const ticket = db.tickets.find(t => t.onlineCheckout?.orderId === qrId && t.status === 'inside')
   if (!ticket) return reply({ ok: true, ignored: true })
   // Same checks as the gate's own "check payment": confirm with Razorpay, capture, then mark the ticket Paid.
@@ -438,7 +462,7 @@ Deno.serve(async request => {
     const body = JSON.parse(raw)
     const subroute = new URL(request.url).pathname.split('/').at(-1)
     // Keep-awake ping (a scheduled job calls this every few minutes so the first payment is not slow).
-    if (body?.action === 'ping') return reply({ ok: true })
+    if (body?.action === 'ping') { await reconcileUpi().catch(error => console.error('UPI reconcile failed: ' + error)); return reply({ ok: true }) }
     // Razorpay webhook: Razorpay tells us the moment a QR is paid, so the gate turns Paid without waiting for a poll.
     if (subroute === 'razorpay-webhook') return await razorpayWebhook(request, raw, body)
     const action = isPaymentRoute(subroute) ? subroute : body?.action

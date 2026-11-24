@@ -471,3 +471,9 @@ body.has-update .gh-time { display: none; }
 :root[data-theme="dark"] .hsrp, :root[data-theme="dark"] .ind-plate { box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3.5px #0a0a0a, 0 0 0 1.5px rgb(255 255 255 / 85%), 0 2px 6px rgb(0 0 0 / 50%); }
 .tk2-head .ind-plate { justify-content: flex-start; }
 .hsrp i, .ind-plate i { background: radial-gradient(circle at 50% 80%, #e6ecff 0 2.5px, #8fa7f5 2.6px 3.4px, transparent 3.5px), linear-gradient(0deg, #2457e0, #1340b8) !important; justify-content: flex-start !important; padding: 3px 3px 0 !important; }
+
+/* Customer paid · confirm */
+.q9-paidbtn { width: 100%; min-height: 50px; font-size: 16px; }
+.q9-paid-check { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--color-success-bg); color: var(--color-success-text); }
+.q9-paid-check b { font-size: 15px; color: var(--color-text); }
+.q9-paid-check small { font-size: 12px; color: var(--color-text-secondary); }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { dur, prettyPlate, rupees, type Ticket } from './engine'
 import { callParkingPayment } from './parking-api'
 import { chime } from './done'
+import { confirmUpi } from './actions'
 import { Ico, QR } from './ui'
 
 type Order = { order_id: string; amount: number; link_url?: string; upi_qr?: string; qr_image?: string }
@@ -37,6 +38,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [confirmCash, setConfirmCash] = useState(false)
+  const [confirmPaid, setConfirmPaid] = useState(false)
   const [now, setNow] = useState(Date.now())
   const busyRef = useRef(false)
   const started = useRef(false)
@@ -155,7 +157,17 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
-        {!paid && !confirmCash && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
+        {state === 'waiting' && (confirmPaid
+          ? <div className="q9-paid-check" role="group" aria-label="Confirm the customer paid">
+            <b>Does the customer's phone show {rupees(amount)} paid successfully?</b>
+            <small>Look at their UPI app. Razorpay still confirms it in the background; if the money never arrives, it shows on the dashboard.</small>
+            <div className="q9-confirm">
+              <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirmPaid(false)}>No</button>
+              <button className="btn btn-success" disabled={busy} onClick={() => void run(async () => { const r = await confirmUpi('sunil', t.id, t.rev); onRevision(r.rev) })}><Ico n="check" /> Yes, paid</button>
+            </div>
+          </div>
+          : <button className="btn btn-success btn-lg q9-paidbtn" disabled={busy} onClick={() => setConfirmPaid(true)}><Ico n="check" /> Customer paid · confirm</button>)}
+        {!paid && !confirmCash && !confirmPaid && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
         {message && <p className="msg bad" role="alert">{message}</p>}
         {!paid && <p className="q9-foot">Checked automatically every 1.5 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
       </div>
