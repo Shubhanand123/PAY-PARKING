@@ -17,6 +17,7 @@ type CheckoutOptions = {
   prefill?: { contact?: string; email?: string }
   handler: (response: Signature) => void
   modal: { ondismiss: () => void }
+  config?: { display: { blocks: Record<string, { name: string; instruments: { method: string; flows?: string[] }[] }>; sequence: string[]; preferences: { show_default_blocks: boolean } } }
 }
 type CheckoutInstance = { open: () => void; on: (event: 'payment.failed', handler: () => void) => void }
 type Checkout = new (options: CheckoutOptions) => CheckoutInstance
@@ -146,7 +147,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
     finally { finish() }
   }
 
-  /** Open Razorpay Standard Checkout (all payment methods; test mode shows Razorpay's test screens). */
+  /** Open Razorpay Checkout. At the POS it shows only UPI, with the QR for the customer to scan. */
   async function open() {
     if (!begin()) return
     try {
@@ -168,6 +169,11 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
         name,
         description: 'Parking ticket ' + ticketId,
         theme: { color: '#16245c' },
+        // POS: UPI only, QR first; card, wallet and netbanking are hidden.
+        ...(pos ? { config: { display: {
+          blocks: { upi: { name: 'Scan with any UPI app', instruments: [{ method: 'upi', flows: ['qr'] }] } },
+          sequence: ['block.upi'], preferences: { show_default_blocks: false },
+        } } } : {}),
         modal: { ondismiss: () => {
           if (verifying) return
           setMessage(previous => previous || 'Razorpay closed. Pay again, check the status, or switch to cash.')
@@ -221,14 +227,12 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   if (!pos && qr) return <p className="msg info">Scan the UPI QR on the attendant's screen to pay.</p>
 
   return <section className="stack razorpay-actions" aria-label="Online payment">
-    {pos && !hasOrder && !test && <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void showUpiQr()}>
-      <Ico n="qr" size={24} /> {busy ? 'Working…' : <>Show UPI QR · {rupees(amount)}</>}
-    </button>}
     {linkUrl
       ? <a className="btn btn-primary btn-xl" href={linkUrl} target="_blank" rel="noopener noreferrer">Open Razorpay payment · {rupees(amount)}</a>
-      : <button className={'btn ' + (pos && !test ? 'btn-ghost' : 'btn-primary btn-xl')} disabled={busy || amount < 100} onClick={() => void open()}>
-        {busy && (!pos || test) ? 'Working…' : <>{hasOrder ? 'Resume Razorpay' : pos && !test ? 'Card / other · Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
+      : <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void open()}>
+        <Ico n="qr" size={24} /> {busy ? 'Working…' : <>{hasOrder ? 'Resume UPI payment' : pos ? 'Pay by UPI' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
       </button>}
+    {pos && !hasOrder && !test && <button className="link" disabled={busy || amount < 100} onClick={() => void showUpiQr()}>QR not showing in Razorpay? Show it on this screen</button>}
     {hasOrder && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
     {pos && hasOrder && (confirmCash
       ? <div className="card stack">
