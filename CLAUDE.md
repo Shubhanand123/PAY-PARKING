@@ -24,7 +24,14 @@ Planned:
 3. Two-line motorcycle plates: split rows and join them.
 4. Tap-to-capture at full resolution, a torch toggle (`applyConstraints({ advanced: [{ torch: true }] })`), and show the frozen frame with the reading.
 5. Keep the manual entry path one tap away.
-Ask the owner which POS hardware the gate uses (Android POS with printer vs phone) before tuning.
+Hardware: an Android POS machine with a built-in barcode scanner and a camera. Brand and model are unknown, so stay generic. The built-in scanner most likely types the ticket QR like a keyboard and ends with Enter. Catch fast keystrokes on the Exit screen.
+
+## Plate model: owner's decision (24 Nov 2026)
+- Train first on public, openly licensed Indian plate datasets: Roboflow Universe Indian plate sets (check each set's licence; many are CC BY 4.0), Mendeley NPDS (about 19k images, COCO), and the IEEE DataPort Indian ANPR sets. Don't scrape random web images.
+- Pipeline: small plate detector (YOLO nano, exported to ONNX/TFLite) → crop and deskew → plate OCR (fine-tuned on Indian and Goa fonts plus the existing synthetic crops) → vote across 2–3 frames → auto-fill.
+- Learning: the owner said yes to saving scans. Store the plate crop, the raw reading and the operator-confirmed plate. Auto-delete after a set number of days. Retrain periodically and ship new model versions to devices.
+- Target "instant": auto-fill within about 1 second of the plate entering the frame, on a mid-range Android POS.
+- An Android wrapper (Capacitor) with ML Kit text recognition is the recommended fast path.
 
 ## Rules
 - Money is integer paise; times are UTC ms shown in Asia/Kolkata.
