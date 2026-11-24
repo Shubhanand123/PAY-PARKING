@@ -130,9 +130,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
 
       <div className="q9-card">
         <div className="q9-code">
-          {code?.text ? <QR text={code.text} size={480} level="H" /> : <div className="q9-ph" />}
-          {code?.text && <span className="q9-mark"><Ico n="p" size={26} /></span>}
-          {state === 'waiting' && <i className="q9-beam" />}
+          {code?.text ? <QR text={code.text} size={480} level="M" /> : <div className="q9-ph" />}
           {state === 'paid' && <div className="q9-over ok"><span className="q9-tick"><Ico n="check" size={40} /></span><b>{rupees(amount)} received</b><small>Opening the receipt…</small></div>}
           {state === 'expired' && <div className="q9-over"><b>QR expired</b><small>It was valid for 30 minutes. Make a new one for the amount due now.</small>
             <button className="btn btn-primary" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR</button></div>}

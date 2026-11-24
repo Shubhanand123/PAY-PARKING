@@ -55,10 +55,11 @@ export function Ico({ n, size = 20, className }: { n: string; size?: number; cla
   return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: P[n] ?? '' }} />
 }
 
+/** A QR drawn as vector shapes: razor sharp at any size, on screen and on the printed slip. */
 export function QR({ text, size = 132, level = 'M' }: { text: string; size?: number; level?: 'M' | 'H' }) {
-  const [src, setSrc] = useState('')
-  useEffect(() => { QRCode.toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: level }).then(setSrc) }, [text, size, level])
-  return src ? <img src={src} width={size} height={size} alt="Ticket QR code" /> : <div style={{ width: size, height: size }} />
+  const [svg, setSvg] = useState('')
+  useEffect(() => { QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: level, color: { dark: '#000000', light: '#ffffff' } }).then(setSvg) }, [text, level])
+  return <div className="qr-svg" role="img" aria-label="QR code" style={{ width: size, height: size, maxWidth: '100%', aspectRatio: '1' }} dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
 export function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'bad' | 'info' | 'mute'; children: ReactNode }) {
