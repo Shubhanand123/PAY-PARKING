@@ -1,6 +1,7 @@
 import { auth } from './parking-auth'
 import { Login } from './Login'
 import { apiEnabled, callParking, deviceKey, openAccess, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
+import { nativeApp } from './native'
 import type { DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
 import { useDB, Ico, Toast } from './ui'
@@ -182,9 +183,10 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
     </div>
   )
 
-  const requested: View = r === 'exit' ? 'exit' : r === 'owner' ? 'owner' : 'entry'
+  // The POS app is for the gates only: the Owner dashboard lives on the website, behind the Owner's sign-in.
+  const requested: View = r === 'exit' ? 'exit' : r === 'owner' && !nativeApp ? 'owner' : 'entry'
   const view = role === 'both' ? (requested === 'exit' ? 'exit' : 'entry') : role ?? requested
-  const routes: View[] = role === 'both' ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
+  const routes: View[] = role === 'both' || nativeApp ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
   const me = db.staff.find(s => s.id === (view === 'entry' ? 'ravi' : view === 'exit' ? 'sunil' : 'owner'))!
   const wide = view === 'owner'
   return (
