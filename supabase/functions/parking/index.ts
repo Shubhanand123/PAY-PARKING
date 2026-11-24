@@ -386,6 +386,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   } else {
     payment = await findCapturedPayment(razorpay, order.orderId)
   }
+  if (payment) console.log(`Payment timing: ${payment.id} paid at ${payment.created_at ? new Date(payment.created_at * 1000).toISOString() : '?'} · seen ${new Date().toISOString()} · ${payment.created_at ? Math.round(Date.now() / 1000 - payment.created_at) : '?'} s later · via ${actor ? 'gate check' : 'webhook/customer'}`)
   if (!payment || payment.status !== 'captured') return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
   if (!razorpayPaymentId.test(payment.id) || (action === 'verify-payment' && payment.id !== payload.razorpay_payment_id)
     || payment.order_id !== providerOrderId || payment.amount !== order.amount || payment.currency !== order.currency || (payment.amount_refunded ?? 0) !== 0) {
@@ -413,6 +414,7 @@ async function hmacHex(secret: string, message: string) {
 }
 
 async function razorpayWebhook(request: Request, raw: string, body: Record<string, unknown>) {
+  console.log('Razorpay webhook received: ' + String(body?.event))
   const secret = Deno.env.get('RAZORPAY_WEBHOOK_SECRET')
   const signature = request.headers.get('X-Razorpay-Signature') ?? ''
   if (!secret || !/^[a-f0-9]{64}$/.test(signature) || await hmacHex(secret, raw) !== signature) return reply({ error: 'Signature did not match.' }, 400)

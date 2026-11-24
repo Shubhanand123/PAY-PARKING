@@ -11,6 +11,7 @@ export type RazorpayPayment = {
   currency: string
   status: string
   amount_refunded?: number
+  created_at?: number
 }
 
 export const razorpayOrderId = /^order_[A-Za-z0-9]+$/
