@@ -72,14 +72,14 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
     else if (!order) void create()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Check with Razorpay every 3 s, so the screen turns Paid even without a tap.
+  // Check with Razorpay every 1.5 s, so the screen turns Paid even without a tap.
   useEffect(() => {
     if (!code || paid) return
     let live = true
     const i = setInterval(async () => {
       if (busyRef.current) return
       try { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id }); if (live) onRevision(r.revision) } catch { /* not paid yet */ }
-    }, 3000)
+    }, 1500)
     return () => { live = false; clearInterval(i) }
   }, [code, paid, t.id, onRevision])
 
@@ -87,7 +87,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
   useEffect(() => {
     if (!paid) return
     chime()
-    const i = setTimeout(onDone, 1700)
+    const i = setTimeout(onDone, 1100)
     return () => clearTimeout(i)
   }, [paid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -156,7 +156,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
         {!paid && !confirmCash && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
         {message && <p className="msg bad" role="alert">{message}</p>}
-        {!paid && <p className="q9-foot">Checked automatically every 3 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
+        {!paid && <p className="q9-foot">Checked automatically every 1.5 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
       </div>
     </section>
   )
