@@ -1,5 +1,5 @@
 import { indianMobile } from './parking-auth'
-import { apiEnabled, callParking } from './parking-api'
+import { apiEnabled, callParking, openAccess } from './parking-api'
 import { publishTariff, saveSettings } from './actions'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
@@ -15,7 +15,7 @@ type Tab = 'overview' | 'tickets' | 'audit' | 'rates' | 'settings' | 'devices'
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
   const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['audit', 'Master audit', 'search'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
-  if (apiEnabled) tabs.push(['devices', 'Devices', 'gear'])
+  if (apiEnabled && !openAccess) tabs.push(['devices', 'Devices', 'gear'])
   return (
     <div className="owner">
       <nav className="tabs" aria-label="Owner sections">

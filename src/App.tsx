@@ -1,6 +1,6 @@
 import { auth } from './parking-auth'
 import { Login } from './Login'
-import { apiEnabled, callParking, deviceKey, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
+import { apiEnabled, callParking, deviceKey, openAccess, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
 import type { DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
 import { useDB, Ico, Toast } from './ui'
@@ -27,7 +27,40 @@ function openDirectPos(link: string) {
 const isPosLink = (value: string) => /^(?:pos|pair-pos)\//.test(value)
 
 export default function App() {
-  return apiEnabled ? <ConnectedApp /> : <LocalApp />
+  return !apiEnabled ? <LocalApp /> : openAccess ? <OpenApp /> : <ConnectedApp />
+}
+
+/** No sign-in: every device gets Entry, Exit and Owner, all on the shared server records. */
+function OpenApp() {
+  const [snapshot, setSnapshot] = useState<Snapshot>()
+  const [customer, setCustomer] = useState<DB>()
+  const [error, setError] = useState('')
+  const [r, setR] = useState(route())
+  useEffect(() => {
+    const changed = () => setR(route())
+    const updated = (event: Event) => setSnapshot((event as CustomEvent<Snapshot>).detail)
+    addEventListener('hashchange', changed)
+    addEventListener('parking-snapshot', updated)
+    return () => { removeEventListener('hashchange', changed); removeEventListener('parking-snapshot', updated) }
+  }, [])
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      try {
+        if (r.startsWith('t/')) {
+          const response = await callParking('customer', [r.slice(2)], '')
+          if (active) setCustomer(response.db)
+        } else await callParking('snapshot')
+        if (active) setError('')
+      } catch (failure) { if (active) setError((failure as Error).message) }
+    }
+    void refresh()
+    const poll = setInterval(refresh, 5000)
+    return () => { active = false; clearInterval(poll) }
+  }, [r])
+  if (r.startsWith('t/')) return customer ? <ParkingApp db={customer} /> : <main className="content"><p role="status">{error || 'Loading ticket…'}</p></main>
+  if (!snapshot) return <main className="screen"><div className="content"><p role={error ? 'alert' : 'status'}>{error || 'Connecting to parking records…'}</p></div></main>
+  return <><ParkingApp db={snapshot.db} />{error && <div className="content"><p role="alert">{error} Reconnect before collecting cash.</p></div>}</>
 }
 
 function LocalApp() {
@@ -134,7 +167,8 @@ function ConnectedApp() {
   </div>
 }
 
-function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; signOut?: () => void }) {
+function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['role']; signOut?: () => void }) {
+  const role = given === 'open' ? undefined : given
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
@@ -159,7 +193,7 @@ function ParkingApp({ db, role, signOut }: { db: DB; role?: Snapshot['role']; si
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
-          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">Local mode · this browser</span>}
+          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Test mode · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
           {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}

@@ -10,6 +10,8 @@ const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const keyId = Deno.env.get('RAZORPAY_KEY_ID')
 const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
 const razorpay = keyId && keySecret ? { keyId, keySecret } : undefined
+// Temporary: while PARKING_OPEN_ACCESS=true, requests without a login or device key get full access (role 'open').
+const openAccess = Deno.env.get('PARKING_OPEN_ACCESS') === 'true'
 const headers = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'content-type, x-device-key, authorization',
@@ -221,7 +223,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   const token = payload.ticket_token
   const ticketId = payload.ticket_id
   if (!actor && (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token))) return reply({ error: 'Ticket access is required.' }, 401)
-  if (actor && !['owner', 'exit', 'both'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
+  if (actor && !['owner', 'exit', 'both', 'open'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
   if (actor && (typeof ticketId !== 'string' || !/^T-\d{6,}$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
   const select = (db: parking.DB) => db.tickets.find(item => actor ? item.id === ticketId : item.token === token)
   const initial = await state()
@@ -422,6 +424,9 @@ Deno.serve(async request => {
           method: 'POST', body: JSON.stringify({ operator_id: signedIn?.id, operator_session: session, operator_mobile: access.parking_mobile }),
         })) return reply({ error: 'Sign in again with your current PIN.' }, 401)
       }
+    } else if (openAccess && !request.headers.get('X-Device-Key')) {
+      role = 'open'
+      deviceLabel = undefined
     } else {
       const key = request.headers.get('X-Device-Key') ?? ''
       if (!/^[a-f0-9]{64}$/.test(key)) return reply({ error: 'Sign in to continue.' }, 401)
@@ -536,7 +541,7 @@ Deno.serve(async request => {
     if (action === 'snapshot') return reply({ snapshot: publishState(await state(), role) })
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
     const command = actions[action as keyof typeof actions]
-    const allowed = role === 'both'
+    const allowed = role === 'open' ? true : role === 'both'
       ? command.roles.includes('entry') || command.roles.includes('exit')
       : command.roles.includes(role)
     if (!allowed) return reply({ error: 'This device cannot perform that action.' }, 403)
@@ -551,7 +556,8 @@ Deno.serve(async request => {
       const atExit = action === 'markPrinted'
         ? db.tickets.some(ticket => ticket.id === args[0] && ticket.status === 'exited')
         : action !== 'createEntry'
-      const staffId = role === 'owner' ? 'owner' : role === 'exit' || (role === 'both' && atExit) ? 'sunil' : 'ravi'
+      const staffId = role === 'owner' || (role === 'open' && command.roles.length === 1 && command.roles[0] === 'owner') ? 'owner'
+        : role === 'exit' || ((role === 'both' || role === 'open') && atExit) ? 'sunil' : 'ravi'
       const result = parking.runAction(db, staffId, (snapshot, staff) => {
         const label = signedIn?.app_metadata?.parking_label ?? deviceLabel
         return commandFn(snapshot, label ? { ...staff, name: label } : staff, ...args)

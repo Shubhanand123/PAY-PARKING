@@ -2,6 +2,8 @@ import { auth } from './parking-auth'
 import type { DB } from './engine'
 
 export const apiEnabled = Boolean(import.meta.env.VITE_PARKING_API)
+/** Temporary: no sign-in. The server must also have PARKING_OPEN_ACCESS=true. */
+export const openAccess = import.meta.env.VITE_OPEN_ACCESS === 'true'
 const keyName = 'parking-device-key'
 export const deviceKey = () => localStorage.getItem(keyName) ?? ''
 export function setDeviceKey(key: string) {
@@ -17,14 +19,14 @@ export class ParkingApiError extends Error {
   }
 }
 
-export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'both' | 'owner'; version: number }
+export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'both' | 'owner' | 'open'; version: number }
 let version = -1
 export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment' | 'switch-to-cash'
 type ParkingResponse = { snapshot?: Snapshot }
 
 async function requestParking<T extends ParkingResponse>(body: unknown, setupKey?: string, subroute?: PaymentEndpoint): Promise<T> {
-  const session = setupKey !== undefined ? null : (await auth?.auth.getSession())?.data.session
-  const key = setupKey ?? (session ? '' : deviceKey())
+  const session = openAccess || setupKey !== undefined ? null : (await auth?.auth.getSession())?.data.session
+  const key = openAccess ? '' : setupKey ?? (session ? '' : deviceKey())
   const endpoint = import.meta.env.VITE_PARKING_API.replace(/\/$/, '')
   const response = await fetch(endpoint + (subroute ? '/' + subroute : ''), {
     method: 'POST',
