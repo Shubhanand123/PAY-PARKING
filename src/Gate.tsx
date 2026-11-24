@@ -357,7 +357,7 @@ export function Exit({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
       <div className="card">
         <button className="btn btn-primary btn-xl" onClick={() => setScanningPlate(true)}><Ico n="scan" /> Scan ticket or plate</button>
         <label className="lbl" htmlFor="q">Manual lookup</label>
-        <input id="q" className="field plate-field" value={q} autoComplete="off" placeholder="Plate or ticket number" onChange={e => {
+        <input id="q" className="field plate-field" value={q} autoComplete="off" placeholder="Plate or ticket" onChange={e => {
           setQ(e.target.value); setPick(null); setScannedPlate(false); setPlateAlternatives([])
         }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
         <button className="btn btn-ghost" onClick={() => find('auto')} disabled={!q.trim()}><Ico n="search" /> Find ticket</button>

@@ -195,7 +195,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
-          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Test mode · no sign-in' : 'Local mode · this browser'}</span>}
+          {signOut ? view === 'owner' && <button className="demo-tag signout" onClick={signOut}>Sign out</button> : <span className="demo-tag">{openAccess ? 'Open access · no sign-in' : 'Local mode · this browser'}</span>}
         </div>
         {routes.length > 0 && <nav className="switch" aria-label="Choose screen">
           {routes.map(v => <a key={v} href={'#/' + v} className={'sw-btn' + (view === v ? ' on' : '')} aria-current={view === v}>{v === 'entry' ? 'Entry gate' : v === 'exit' ? 'Exit gate' : 'Owner'}</a>)}
