@@ -185,3 +185,6 @@
 /* Razorpay's QR comes as a full poster picture: show all of it, never cropped */
 .q9-code.poster { aspect-ratio: auto; width: 100%; max-width: 380px; background: #fff; }
 .q9-code.poster img { width: 100%; height: auto; max-height: 58dvh; object-fit: contain; }
+/* only the QR, as big as the screen allows */
+.q9-code:not(.poster) { width: min(100%, 420px); border-radius: 8px; }
+.q9-card { padding: 10px; }

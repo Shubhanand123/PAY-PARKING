@@ -115,7 +115,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
 
       <div className="q9-card">
         <div className={'q9-code' + (code?.image && !code.text ? ' poster' : '')}>
-          {code?.text ? <QR text={code.text} size={320} level="H" /> : code?.image ? <img src={code.image} alt="UPI payment QR code" /> : <div className="q9-ph" />}
+          {code?.text ? <QR text={code.text} size={400} level="H" /> : code?.image ? <img src={code.image} alt="UPI payment QR code" /> : <div className="q9-ph" />}
           {code?.text && !code.link && <span className="q9-mark"><Ico n="p" size={26} /></span>}
           {state === 'waiting' && !(code?.image && !code.text) && <i className="q9-beam" />}
           {state === 'paid' && <div className="q9-over ok"><span className="q9-tick"><Ico n="check" size={40} /></span><b>{rupees(amount)} received</b><small>Opening the receipt…</small></div>}
@@ -138,7 +138,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
         <li><span><Ico n="check" /></span>Approve {rupees(amount)}</li>
       </ol>
       {code?.link && <p className="tiny muted center">Scan with the phone camera and pay on Razorpay.</p>}
-      {code?.image && !paid && <a className="btn btn-primary btn-lg" href={code.image} target="_blank" rel="noopener noreferrer"><Ico n="qr" /> Open QR on Razorpay screen</a>}
+      {code?.image && !paid && <a className="btn btn-ghost" href={code.image} target="_blank" rel="noopener noreferrer"><Ico n="qr" /> Open QR on Razorpay screen</a>}
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
