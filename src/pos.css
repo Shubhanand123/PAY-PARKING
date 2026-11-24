@@ -334,3 +334,32 @@
 .gh .parker-logo { height: 38px; }
 .hero .brand .parker-logo { height: 42px; }
 @media (max-width: 360px) { .gh .parker-logo { height: 28px; } }
+
+/* Update strip (POS, only while switching) and bar (dashboard) */
+.upd-strip { position: fixed; top: 0; left: 0; right: 0; z-index: 100; display: flex; align-items: center; justify-content: center; gap: 8px; padding: calc(env(safe-area-inset-top, 0px) + 6px) 12px 6px; background: #16245c; color: #fff; font: 700 13px var(--font); animation: rise-in 200ms var(--ease) both; }
+.upd-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgb(255 255 255 / 35%); border-top-color: #fff; animation: upd-spin .8s linear infinite; }
+@keyframes upd-spin { to { transform: rotate(1turn); } }
+.upd-bar { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 99px; background: #16245c; color: #fff; font: 700 13px var(--font); box-shadow: 0 8px 24px -8px rgb(6 22 60 / 60%); animation: rise-in 240ms var(--ease) both; white-space: nowrap; }
+.upd-bar.urgent { background: #b72c2f; }
+.upd-bar button { border: 0; border-radius: 99px; padding: 8px 14px; min-height: 36px; background: #fff; color: #16245c; font: 800 13px var(--font); cursor: pointer; }
+
+/* Overview: today at a glance */
+.ov-hero { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px; }
+.ov-money { padding: 16px; border-radius: 18px; color: #fff; background: linear-gradient(150deg, #0d1c4f, #16245c 55%, #1d3a8a); box-shadow: 0 12px 26px -16px rgb(6 22 60 / 80%); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ov-l { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
+.ov-big { font-size: clamp(30px, 9vw, 44px); font-weight: 800; letter-spacing: -.02em; line-height: 1.05; }
+.ov-split { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; opacity: .92; }
+.ov-split .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.dot.cash { background: #fbbf24; } .dot.upi { background: #34d399; }
+.ov-side { display: grid; gap: 10px; }
+.ov-side > div { padding: 12px 14px; border-radius: 16px; background: var(--color-bg-surface); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; min-width: 0; }
+.ov-side .ov-l { color: var(--color-text-secondary); opacity: 1; font-size: 11px; }
+.ov-side b { font-size: 26px; font-weight: 800; line-height: 1.1; }
+.ov-side small { font-size: 12px; color: var(--color-text-secondary); }
+.ov-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.ov-chips span { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 99px; background: var(--color-bg-surface); box-shadow: var(--shadow-sm); font-size: 13px; color: var(--color-text-secondary); white-space: nowrap; }
+.ov-chips b { color: var(--color-text); }
+.ov-chips .warn { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.ov-needs h2 { display: flex; align-items: center; gap: 6px; }
+.ov > * { animation: rise-in 260ms var(--ease) both; }
+@media (max-width: 380px) { .ov-hero { grid-template-columns: 1fr; } .ov-side { grid-template-columns: 1fr 1fr; } }

@@ -1,0 +1,5 @@
+{
+  "urgent": false,
+  "id": "",
+  "note": "For an important fix: set urgent to true and a new id. Every POS then switches within about 3-4 minutes, at the next safe moment."
+}

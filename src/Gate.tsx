@@ -1,5 +1,6 @@
 import { RazorpayCheckout } from './RazorpayCheckout'
 import { PosPay } from './PosPay'
+import { setBusy as markBusy } from './updater'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
@@ -117,6 +118,8 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
   const rate = tv.rates[cat]
   const advance = prepaid && rate ? prepaidPrice(hours, rate) : 0
   useLayoutEffect(() => { onFlow?.(done ? 'Parking slip' : '') }, [done, onFlow])
+  // Updates wait while anything is typed, chosen, open or being scanned.
+  useEffect(() => { markBusy('entry', Boolean(plate || cat || done || scanning || busy)); return () => markBusy('entry', false) }, [plate, cat, done, scanning, busy])
   useLayoutEffect(() => () => onFlow?.(''), [onFlow])
 
   const confirm = async () => {
@@ -244,6 +247,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
   // H2 header: the Entry/Exit switch shows only on the lookup and the bill, not on the QR or the receipt.
   const flow = !t ? '' : paying ? 'Pay by UPI' : t.status === 'paid' || t.status === 'exited' ? 'Receipt' : ''
   useLayoutEffect(() => { onFlow?.(flow) }, [flow, onFlow])
+  useEffect(() => { markBusy('exit', Boolean(t || q || scanningPlate || pick || busy)); return () => markBusy('exit', false) }, [t, q, scanningPlate, pick, busy])
   useLayoutEffect(() => () => onFlow?.(''), [onFlow])
   const active = db.tickets.filter(x => x.status === 'inside' || x.status === 'paid')
   const nq = normPlate(q)

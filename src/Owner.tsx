@@ -65,53 +65,62 @@ function Overview({ db, live }: { db: DB; live?: ReactNode }) {
   const cap = db.settings.capacity
   const occ = cap ? s.inside.length / cap : 0
 
+  const needs = s.longStay.length > 0 || s.cancels > 3
   return (
-    <div className="stack">
-      <div className="kpis">
-        <Kpi icon="p" label="Inside now" value={String(s.inside.length)} sub={cap ? `of ${cap} spaces` : ''} tone="info" />
-        <Kpi icon="cash" label="Collections today" value={rupees(s.cash + s.online)} sub={`${rupees(s.cash)} cash · ${rupees(s.online)} online`} tone="ok" />
-        <Kpi icon="car" label="Entries today" value={String(s.tIn.length)} sub={`${s.tOut.length} left`} />
-        <Kpi icon="clock" label="Average stay" value={s.avg ? dur(s.avg) : '–'} sub="vehicles that left today" />
-        <Kpi icon="rupee" label="Due from cars inside" value={rupees(s.openRunning)} sub="if all left now" />
-        <Kpi icon="x" label="Cancelled today" value={String(s.cancels)} sub={`${s.lostSlip} plate lookups`} tone={s.cancels > 3 ? 'warn' : undefined} />
-        <Kpi icon="print" label="Reprints today" value={String(s.reprints + s.receiptReprints)} sub={`${s.reprints} slips · ${s.receiptReprints} receipts`} tone={s.reprints + s.receiptReprints > 5 ? 'warn' : undefined} />
-        <Kpi icon="check" label="Free exits today" value={String(s.freeToday.length)} sub={`${rupees(s.waivedToday)} waived`} />
+    <div className="stack ov">
+      {/* 1. Today at a glance */}
+      <div className="ov-hero">
+        <div className="ov-money">
+          <span className="ov-l">Collected today</span>
+          <b className="ov-big num">{rupees(s.cash + s.online)}</b>
+          <div className="ov-split"><span><i className="dot cash" />Cash <b className="num">{rupees(s.cash)}</b></span><span><i className="dot upi" />UPI <b className="num">{rupees(s.online)}</b></span></div>
+        </div>
+        <div className="ov-side">
+          <div><span className="ov-l">Inside now</span><b className="num">{s.inside.length}</b><small>{cap ? `of ${cap} spaces` : 'vehicles'}</small></div>
+          <div><span className="ov-l">Entries today</span><b className="num">{s.tIn.length}</b><small>{s.tOut.length} left</small></div>
+        </div>
       </div>
+      {/* 2. Small numbers */}
+      <div className="ov-chips">
+        <span><Ico n="rupee" size={16} />Due from inside <b className="num">{rupees(s.openRunning)}</b></span>
+        <span><Ico n="clock" size={16} />Average stay <b className="num">{s.avg ? dur(s.avg) : '–'}</b></span>
+        <span><Ico n="check" size={16} />Free exits <b className="num">{s.freeToday.length}</b></span>
+        <span className={s.cancels > 3 ? 'warn' : ''}><Ico n="x" size={16} />Cancels <b className="num">{s.cancels}</b></span>
+        <span className={s.reprints + s.receiptReprints > 5 ? 'warn' : ''}><Ico n="print" size={16} />Reprints <b className="num">{s.reprints + s.receiptReprints}</b></span>
+      </div>
+      {/* 3. Anything unusual */}
+      {needs && <div className="card ov-needs">
+        <h2><Ico n="warn" /> Needs a look</h2>
+        {s.longStay.map(t => <div key={t.id} className="listrow static"><Ico n="clock" /><b>{prettyPlate(t.plate)}</b><span>inside {dur(now - t.entryAt)}</span><Pill tone="warn">Long stay</Pill></div>)}
+        {s.cancels > 3 && <div className="listrow static"><Ico n="warn" /><b>{s.cancels} cancels today</b><span>See the Activity log</span></div>}
+      </div>}
+      {/* 4. What is happening */}
       {live}
+      {/* 5. Charts */}
       <div className="grid2">
+        <div className="card">
+          <h2>Collections, last 7 days</h2>
+          <Bars data={s.daily.map(d => ({ label: new Date(d.d + 'T12:00:00+05:30').toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' }), v: d.v / 100, tip: `${rupees(d.v)} · ${d.n} vehicles` }))} fmt={v => '₹' + Math.round(v).toLocaleString('en-IN')} />
+        </div>
+        <div className="card">
+          <h2>Today by hour</h2>
+          <p className="muted small">Entries and exits each hour. Busy hours show when to add staff.</p>
+          <Lines hours={s.hours} />
+        </div>
+      </div>
+      <div className="grid2">
+        <div className="card">
+          <h2>Today by vehicle type</h2>
+          <Donut parts={s.byCat.map((c, i) => ({ label: c.name, v: c.rev, color: `var(--color-chart-${i + 1})` }))} />
+        </div>
         {cap > 0 && <div className="card">
           <h2>Occupancy</h2>
           <Gauge v={occ} label={`${Math.round(occ * 100)}%`} sub={`${s.inside.length} of ${cap}`} />
           <div className="legend">{s.byCat.filter(c => c.n).map(c => <span key={c.name}><Ico n={c.icon} size={16} /> {c.name} <b>{c.n}</b></span>)}</div>
         </div>}
-        <div className="card">
-          <h2>Collections, last 7 days</h2>
-          <Bars data={s.daily.map(d => ({ label: new Date(d.d + 'T12:00:00+05:30').toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' }), v: d.v / 100, tip: `${rupees(d.v)} · ${d.n} vehicles` }))} fmt={v => '₹' + Math.round(v).toLocaleString('en-IN')} />
-        </div>
-      </div>
-      <div className="card">
-        <h2>Today by hour</h2>
-        <p className="muted small">Entries and exits each hour (IST). Busy hours tell you when to put extra staff at the gate.</p>
-        <Lines hours={s.hours} />
-      </div>
-      <div className="grid2">
-        <div className="card">
-          <h2>Collections today by vehicle type</h2>
-          <Donut parts={s.byCat.map((c, i) => ({ label: c.name, v: c.rev, color: `var(--color-chart-${i + 1})` }))} />
-        </div>
-        <div className="card">
-          <h2>Needs a look</h2>
-          {s.longStay.length === 0 && s.cancels <= 3 && <Empty text="Nothing unusual right now." />}
-          {s.longStay.map(t => <div key={t.id} className="listrow static"><Ico n="clock" /><b>{prettyPlate(t.plate)}</b><span>inside {dur(now - t.entryAt)}</span><Pill tone="warn">Long stay</Pill></div>)}
-          {s.cancels > 3 && <div className="listrow static"><Ico n="warn" /><b>{s.cancels} cancels today</b><span>Check the master audit</span></div>}
-        </div>
       </div>
     </div>
   )
-}
-
-function Kpi({ icon, label, value, sub, tone }: { icon: string; label: string; value: string; sub?: string; tone?: 'ok' | 'info' | 'warn' }) {
-  return <div className={'kpi' + (tone ? ' kpi-' + tone : '')}><span className="kpi-ico"><Ico n={icon} /></span><div className="kpi-l">{label}</div><div className="kpi-v num">{value}</div>{sub && <div className="kpi-s">{sub}</div>}</div>
 }
 
 function Gauge({ v, label, sub }: { v: number; label: string; sub: string }) {
@@ -253,7 +262,7 @@ function AuditRow({ a, now }: { a: DB['audit'][number]; now?: number }) {
 /** Overview card: the latest things that happened, live. */
 function LiveActivity({ db, onAll }: { db: DB; onAll: () => void }) {
   const now = useNow(15000)
-  const latest = db.audit.slice(-8).reverse()
+  const latest = db.audit.filter(a => a.kind !== 'print' && a.kind !== 'receipt_print').slice(-8).reverse()
   return <div className="card live-activity">
     <div className="bill-head"><h2><span className="live-dot" /> Live activity</h2><button className="link" onClick={onAll}>See all</button></div>
     {latest.map(a => <AuditRow key={a.id} a={a} now={now} />)}
@@ -275,7 +284,8 @@ function AuditLog({ db }: { db: DB }) {
   const today = istDay(now)
   const since = days === 0 ? 0 : days === 1 ? new Date(today + 'T00:00:00+05:30').getTime() : now - days * 86400000
   const people = useMemo(() => [...new Set(db.audit.map(a => a.by))].sort(), [db.audit])
-  const list = db.audit.filter(a => a.at >= since
+  // Normal slip and receipt prints are routine: hidden. Reprints stay (they are worth checking).
+  const list = db.audit.filter(a => a.kind !== 'print' && a.kind !== 'receipt_print' && a.at >= since
     && (what === 'all' || (what === 'money' ? ['payment', 'exit'].includes(a.kind) : what === 'gate' ? ['entry', 'exit', 'payment'].includes(a.kind) : RISK.includes(a.kind)))
     && (who === 'all' || a.by === who) && (!q || (a.text + ' ' + (a.ticketId ?? '') + ' ' + a.by).toLowerCase().includes(q.toLowerCase()))).slice().reverse()
   const byPerson = people.map(name => {

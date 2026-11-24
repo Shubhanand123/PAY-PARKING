@@ -1,13 +1,21 @@
 // PARKAR offline copy. The app opens straight from the copy saved on this POS (fast, and works with no internet);
 // a newer version is fetched quietly in the background and is used from the next open.
 // Only the app's own files are kept here. Tickets and payments always go to the server.
-const CACHE = 'parkar-app-v2'
+const CACHE = 'parker-app-v3'
 const SHELL = './'
 
 self.addEventListener('install', event => {
   event.waitUntil(refreshShell().catch(() => {}).then(() => self.skipWaiting()))
 })
-self.addEventListener('activate', event => { event.waitUntil(self.clients.claim()) })
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()))
+})
+// The app found a newer version: save it now, then answer, so the switch is instant and works offline after.
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'refresh') return
+  const reply = () => event.ports[0]?.postMessage('done')
+  event.waitUntil(refreshShell().catch(() => {}).then(reply))
+})
 
 /** Fetch the latest page and every file it needs; switch to it only when all of them are saved. */
 async function refreshShell() {
@@ -25,7 +33,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return // server, Razorpay, fonts: never cached here
-  if (url.pathname.endsWith('/app-version.json') || url.pathname.endsWith('/sw.js')) return // always fresh
+  if (url.pathname.endsWith('/app-version.json') || url.pathname.endsWith('/sw.js') || url.searchParams.has('fresh')) return // always fresh
 
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
