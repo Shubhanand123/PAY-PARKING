@@ -27,7 +27,10 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
 }) {
   const order = t.onlineCheckout
   const fromTicket: Code | null = order?.upiQr || order?.qrImage ? { text: order.upiQr, image: order.qrImage } : null
-  const linkOnly = Boolean(order?.linkUrl && !order.upiQr && !order.qrImage)
+  // An older order on this ticket (payment link or Checkout order, no UPI QR) is replaced by a fresh UPI QR.
+  const staleOrder = Boolean(order && !order.upiQr && !order.qrImage)
+  const amountRef = useRef(amount)
+  amountRef.current = amount
   const [code, setCode] = useState<Code | null>(fromTicket)
   const [madeAt, setMadeAt] = useState(order?.billedAt ?? Date.now())
   const [busy, setBusy] = useState(false)
@@ -48,12 +51,14 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
     if (busyRef.current) return undefined
     busyRef.current = true; setBusy(true); setMessage('')
     try { return await fn() }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Something went wrong. Check the payment status.'); return undefined }
+    catch (error) { const m = error instanceof Error ? error.message : 'Something went wrong. Check the payment status.'; lastError.current = m; setMessage(m); return undefined }
     finally { busyRef.current = false; setBusy(false) }
   }
 
-  const create = () => run(async () => {
-    const o = await callParkingPayment<Order>('create-order', { ticket_id: t.id, amount, currency: 'INR', receipt: t.id, upi_qr: true })
+  const create = async (): Promise<unknown> => { const r = await createOnce(); if (r === undefined && /amount changed/i.test(lastError.current)) { await new Promise(x => setTimeout(x, 800)); return createOnce() } return r }
+  const lastError = useRef('')
+  const createOnce = () => run(async () => {
+    const o = await callParkingPayment<Order>('create-order', { ticket_id: t.id, amount: amountRef.current, currency: 'INR', receipt: t.id, upi_qr: true })
     if (!o.upi_qr && !o.qr_image) {
       // Razorpay gave a payment link (its page asks for a mobile number), not a UPI QR: close it and say why.
       if (o.link_url) await callParkingPayment('switch-to-cash', { ticket_id: t.id }).catch(() => undefined)
@@ -61,6 +66,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
     }
     setCode({ text: o.upi_qr, image: o.qr_image })
     setMadeAt(Date.now())
+    return true
   })
 
   // Open the pay screen: reuse the open QR, or make one for the exact amount.
@@ -68,7 +74,7 @@ export function PosPay({ t, amount, vehicle, paid, onRevision, onDone, onCash, o
     if (started.current) return
     started.current = true
     // An old Razorpay payment link is open (its page asks for a mobile number): close it quietly and make a UPI QR instead.
-    if (linkOnly) void (async () => { const closed = await run(async () => { const r = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id }); onRevision(r.revision); return true }); if (closed) await create() })()
+    if (staleOrder) void (async () => { const closed = await run(async () => { const r = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id }); onRevision(r.revision); return true }); if (closed) { await new Promise(r => setTimeout(r, 600)); await create() } })()
     else if (!order) void create()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -259,12 +259,12 @@ function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: 
   return (
     <header className={'gh gh-' + view}>
       <div className="gh-row">
-        <span className="gh-mark"><img src="skc.svg" alt="SKC" /></span>
+        <span className="gh-mark"><img src="skc.png" alt="SKC" /></span>
         <b className="gh-name">PARKAR</b>
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (online ? '' : ' off')}><i />{online ? 'Online' : 'Offline'}</span>
       </div>
-      {(flow || tabs.length < 2) && <div className={'gh-flow ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={18} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}{flow && <small>· {flow}</small>}</div>}
+      {((flow && flow !== 'Pay by UPI') || (!flow && tabs.length < 2)) && <div className={'gh-flow ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={18} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}{flow && <small>· {flow}</small>}</div>}
       {!flow && tabs.length > 1 && <nav className="gh-tabs" aria-label="Choose gate">
         {tabs.map(v => <a key={v} href={'#/' + v} className={'gh-tab ' + v + (view === v ? ' on' : '')} aria-current={view === v}>
           <Ico n={v === 'entry' ? 'scan' : 'out'} size={18} />{v === 'entry' ? 'Entry' : 'Exit'}</a>)}
