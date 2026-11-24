@@ -1,5 +1,6 @@
 import { auth } from './parking-auth'
 import type { DB } from './engine'
+import { withPending, type OfflineOp } from './offline-sync'
 
 export const apiEnabled = Boolean(import.meta.env.VITE_PARKING_API)
 /** Temporary: no sign-in. The server must also have PARKING_OPEN_ACCESS=true. */
@@ -21,6 +22,50 @@ export class ParkingApiError extends Error {
 
 export type Snapshot = { db: DB; role: 'entry' | 'exit' | 'both' | 'owner' | 'open'; version: number }
 let version = -1
+
+// ---------- offline: saved copy of the records + work waiting to be sent ----------
+const SNAP_KEY = 'parkar-snapshot', OUTBOX_KEY = 'parkar-outbox', DEVICE_KEY = 'parkar-device', COUNT_KEY = 'parkar-offline-count'
+const read = <T>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) as T : fallback } catch { return fallback } }
+let serverSnapshot: Snapshot | undefined = read<Snapshot | undefined>(SNAP_KEY, undefined)
+export const outbox = (): OfflineOp[] => read<OfflineOp[]>(OUTBOX_KEY, [])
+function saveOutbox(ops: OfflineOp[]) { localStorage.setItem(OUTBOX_KEY, JSON.stringify(ops)); window.dispatchEvent(new CustomEvent('parkar-outbox', { detail: ops.length })) }
+/** What the POS shows: the last server records plus offline work not yet sent. */
+export function currentSnapshot(): Snapshot | undefined {
+  return serverSnapshot && { ...serverSnapshot, db: withPending(serverSnapshot.db, outbox()) }
+}
+function showSnapshot() { const s = currentSnapshot(); if (s) window.dispatchEvent(new CustomEvent('parking-snapshot', { detail: s })) }
+/** This POS's short code for offline ticket numbers, e.g. K7. */
+export function deviceCode() {
+  let code = localStorage.getItem(DEVICE_KEY)
+  if (!code) {
+    const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ', digits = '23456789'
+    const r = crypto.getRandomValues(new Uint8Array(2))
+    code = letters[r[0] % letters.length] + digits[r[1] % digits.length]
+    localStorage.setItem(DEVICE_KEY, code)
+  }
+  return code
+}
+export function nextOfflineTicketId() {
+  const n = Number(localStorage.getItem(COUNT_KEY) ?? '0') + 1
+  localStorage.setItem(COUNT_KEY, String(n))
+  return `T-${deviceCode()}-${String(n).padStart(4, '0')}`
+}
+export function queueOffline(op: OfflineOp) { saveOutbox([...outbox(), op]); showSnapshot() }
+/** A failure that means "no internet" (as opposed to the server refusing). */
+export const isOfflineError = (error: unknown) => !navigator.onLine || error instanceof TypeError || (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError'))
+let syncing = false
+/** Send saved offline work. Safe to call often; the server ignores anything it already has. */
+export async function syncOutbox() {
+  const ops = outbox()
+  if (!ops.length || syncing || !navigator.onLine) return
+  syncing = true
+  try {
+    const r = await callParking<{ done: string[]; issues: number }>('syncOffline', [ops.map(op => ({ ...op, device: deviceCode() }))])
+    const done = new Set(r.result.done)
+    saveOutbox(outbox().filter(op => !done.has(op.opId)))
+    showSnapshot()
+  } catch { /* try again on the next round */ } finally { syncing = false }
+}
 export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment' | 'switch-to-cash'
 type ParkingResponse = { snapshot?: Snapshot }
 
@@ -38,7 +83,9 @@ async function requestParking<T extends ParkingResponse>(body: unknown, setupKey
   if (!response.ok) throw new ParkingApiError(data.error ?? 'Parking server unavailable.', response.status)
   if (data.snapshot && data.snapshot.version >= version) {
     version = data.snapshot.version
-    window.dispatchEvent(new CustomEvent('parking-snapshot', { detail: data.snapshot }))
+    serverSnapshot = data.snapshot
+    try { localStorage.setItem(SNAP_KEY, JSON.stringify(data.snapshot)) } catch { /* storage full: still works online */ }
+    showSnapshot()
   }
   return data as T
 }

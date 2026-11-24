@@ -4,6 +4,7 @@ import { dur, fmtDT, fmtTime, freeVehicleFor, istDay, isSupportedPlateFormat, no
 import { Slip, StatusPill } from './Gate'
 import { printSlip } from './print'
 import { Ico, Pill } from './ui'
+import { callParking } from './parking-api'
 
 type Toast = (message: string, bad?: boolean) => void
 const DAY = 24 * 3600_000
@@ -177,6 +178,25 @@ export function FreeVehicles({ db, me, toast }: { db: DB; me: Staff; toast: Toas
           </table></div>}
       </div>
       {ticket && <TicketPaper db={db} t={ticket} me={me} toast={toast} />}
+    </div>
+  )
+}
+
+// ---------- offline work to check ----------
+/** Entries or cash a POS saved without internet that the server could not record as-is. */
+export function OfflineChecks({ db }: { db: DB }) {
+  const open = (db.offlineIssues ?? []).filter(i => !i.resolved).sort((a, b) => b.at - a.at)
+  const [busy, setBusy] = useState('')
+  if (!open.length) return null
+  return (
+    <div className="card stack offline-checks">
+      <h2><Ico n="warn" /> Check these <span className="muted">({open.length})</span></h2>
+      <p className="tiny muted">Work done at a gate while it had no internet, which clashed with another gate. Check each one, fix the ticket if needed, then mark it checked.</p>
+      {open.slice(0, 50).map(i => (
+        <div key={i.opId} className="free-row">
+          <div><b>{i.ticketId}</b><span className="small">{i.text}</span><span className="muted tiny">{fmtDT(i.at)}{i.device ? ` · POS ${i.device}` : ''}</span></div>
+          <button className="btn btn-ghost fit" disabled={busy === i.opId} onClick={async () => { setBusy(i.opId); try { await callParking('resolveOfflineIssue', [i.opId]) } finally { setBusy('') } }}>Mark checked</button>
+        </div>))}
     </div>
   )
 }

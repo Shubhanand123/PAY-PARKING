@@ -9,7 +9,7 @@ import {
 import { Ico, Pill, useNow } from './ui'
 import { StatusPill } from './Gate'
 import { saveStart, saveEnd } from './done'
-import { Customers, FreeVehicles, TicketPaper } from './OwnerExtras'
+import { Customers, FreeVehicles, OfflineChecks, TicketPaper } from './OwnerExtras'
 
 type Tab = 'overview' | 'tickets' | 'customers' | 'free' | 'audit' | 'rates' | 'settings' | 'devices'
 
@@ -23,7 +23,7 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
         {tabs.map(([k, l, i]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)} aria-current={tab === k}><Ico n={i} size={18} />{l}</button>)}
       </nav>
       <div className="owner-panel">
-      {tab === 'overview' && <Overview db={db} />}
+      {tab === 'overview' && <><OfflineChecks db={db} /><Overview db={db} /></>}
       {tab === 'tickets' && <Tickets db={db} me={me} toast={toast} />}
       {tab === 'customers' && <Customers db={db} me={me} toast={toast} />}
       {tab === 'free' && <FreeVehicles db={db} me={me} toast={toast} />}

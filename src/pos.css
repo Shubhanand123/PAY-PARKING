@@ -235,3 +235,7 @@
 .q9 .msg { margin: 0; padding: 8px 10px; font-size: 13px; }
 .gh-mark { height: 34px; padding: 4px 8px; }
 .gh-mark img { height: 26px !important; max-width: 64px; }
+
+.gh-net.wait i { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+.gh-net b { font-weight: 800; }
+.offline-note { margin: 0; padding: 8px 12px; border-radius: 12px; background: var(--color-warning-bg); color: var(--color-warning-text); font-size: 13px; font-weight: 600; }

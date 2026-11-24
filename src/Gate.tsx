@@ -365,7 +365,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
                 : label.startsWith('Free vehicle') ? 'On the owner\'s free list'
                   : label === 'Paid at entry' ? 'Paid when the vehicle came in'
                     : label.startsWith('Minimum') ? 'The prepaid block is the minimum charge' : ''
-    const upi = db.razorpayEnabled && b.duePaise >= 100
+    const upi = db.razorpayEnabled && b.duePaise >= 100 && navigator.onLine
     return (
       <div className="stack exit-bill">
         <div className="card tk2">
@@ -394,6 +394,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
         </div>
         {staleBanner}
         {cancelCard}
+        {!navigator.onLine && b.duePaise > 0 && <p className="offline-note">No internet: UPI is off. Take cash; it is saved on this POS and sent when the internet is back.</p>}
         {!stale && (b.duePaise
           ? <div className="actionbar duo">
             {upi && <button className="btn btn-xl pay-btn upi" disabled={busy} onClick={() => setPaying(true)}><Ico n="qr" size={24} /><span><b>{t.onlineCheckout ? 'Show QR' : 'UPI'}</b><small>{t.onlineCheckout ? 'QR still open' : 'Razorpay QR'}</small></span></button>}

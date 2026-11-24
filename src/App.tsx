@@ -1,6 +1,6 @@
 import { auth } from './parking-auth'
 import { Login } from './Login'
-import { apiEnabled, callParking, deviceKey, openAccess, ParkingApiError, setDeviceKey, type Snapshot } from './parking-api'
+import { apiEnabled, callParking, currentSnapshot, deviceKey, isOfflineError, openAccess, outbox, ParkingApiError, setDeviceKey, syncOutbox, type Snapshot } from './parking-api'
 import { nativeApp } from './native'
 import { fmtTime, type DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
@@ -33,7 +33,8 @@ export default function App() {
 
 /** Gates need no sign-in. The Owner dashboard needs the Owner's mobile number and password. */
 function OpenApp() {
-  const [snapshot, setSnapshot] = useState<Snapshot>()
+  // Opens at once from the records saved on this POS; the server copy replaces it within a second.
+  const [snapshot, setSnapshot] = useState<Snapshot | undefined>(() => { const s = currentSnapshot(); return s?.role === 'owner' ? undefined : s })
   const [customer, setCustomer] = useState<DB>()
   const [sessionId, setSessionId] = useState<string | null | undefined>(auth ? undefined : null)
   const [error, setError] = useState('')
@@ -57,18 +58,20 @@ function OpenApp() {
         if (r.startsWith('t/')) {
           const response = await callParking('customer', [r.slice(2)], '')
           if (active) setCustomer(response.db)
-        } else await callParking('snapshot')
+        } else { await syncOutbox(); await callParking('snapshot') }
         if (active) setError('')
       } catch (failure) {
         if (!active) return
         // An expired or replaced Owner session: drop it and fall back to the open gate view.
         if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await auth?.auth.signOut({ scope: 'local' })
-        setError((failure as Error).message)
+        setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
       }
     }
     void refresh()
     const poll = setInterval(refresh, 5000)
-    return () => { active = false; clearInterval(poll) }
+    const back = () => void refresh()
+    addEventListener('online', back)
+    return () => { active = false; clearInterval(poll); removeEventListener('online', back) }
   }, [r, sessionId])
 
   async function activateOwner(key: string) {
@@ -90,8 +93,8 @@ function OpenApp() {
     if (sessionId === undefined || (sessionId && !error)) return <main className="screen"><div className="content"><p role="status">Checking Owner sign-in…</p></div></main>
     return <Login onOwnerSetup={activateOwner} error={sessionId ? error : ''} />
   }
-  if (!snapshot) return <main className="screen"><div className="content"><p role={error ? 'alert' : 'status'}>{error || 'Connecting to parking records…'}</p></div></main>
-  return <><ParkingApp db={snapshot.db} signOut={owner ? signOut : undefined} />{error && <div className="content"><p role="alert">{error} Reconnect before collecting cash.</p></div>}</>
+  if (!snapshot) return <main className="screen"><div className="content"><p role={error ? 'alert' : 'status'}>{error === 'offline' ? 'No internet. Connect this POS once to load the parking records; after that it also works offline.' : error || 'Connecting to parking records…'}</p></div></main>
+  return <><ParkingApp db={snapshot.db} signOut={owner ? signOut : undefined} offline={error === 'offline'} />{error && error !== 'offline' && <div className="content"><p role="alert">{error}</p></div>}</>
 }
 
 function LocalApp() {
@@ -147,12 +150,14 @@ function ConnectedApp() {
           if (sessionId) await auth?.auth.signOut({ scope: 'local' })
           else setDeviceKey('')
         }
-        setError((failure as Error).message)
+        setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
       }
     }
     void refresh()
     const poll = setInterval(refresh, 5000)
-    return () => { active = false; clearInterval(poll) }
+    const back = () => void refresh()
+    addEventListener('online', back)
+    return () => { active = false; clearInterval(poll); removeEventListener('online', back) }
   }, [r, sessionId])
 
   async function activateOwner(key: string) {
@@ -198,7 +203,7 @@ function ConnectedApp() {
   </div>
 }
 
-function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['role']; signOut?: () => void }) {
+function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; role?: Snapshot['role']; signOut?: () => void; offline?: boolean }) {
   const role = given === 'open' ? undefined : given
   const [r, setR] = useState(route())
   const [toast, setToast] = useState<{ m: string; bad?: boolean } | null>(null)
@@ -223,7 +228,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
   const gate = view !== 'owner'
   return (
     <div className={wide ? 'screen wide' : 'screen'}>
-      {gate ? <GateHeader view={view} routes={routes} flow={flow} /> : <header className="hero">
+      {gate ? <GateHeader view={view} routes={routes} flow={flow} offline={offline} /> : <header className="hero">
         <div className="glow g1" /><div className="glow g2" />
         <div className="hero-row">
           <div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.operator}</div>
@@ -247,7 +252,7 @@ function ParkingApp({ db, role: given, signOut }: { db: DB; role?: Snapshot['rol
 
 /** H2 header for the gates: colour-coded Entry (blue) / Exit (orange) switch, clock and connection light.
  *  While a slip, a payment QR or a receipt is on screen the switch is replaced by a gate badge. */
-function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: string }) {
+function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[]; flow: string; offline: boolean }) {
   const now = useNow(15000)
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => {
@@ -255,6 +260,9 @@ function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: 
     addEventListener('online', on); addEventListener('offline', off)
     return () => { removeEventListener('online', on); removeEventListener('offline', off) }
   }, [])
+  const [waiting, setWaiting] = useState(() => apiEnabled ? outbox().length : 0)
+  useEffect(() => { const f = (e: Event) => setWaiting((e as CustomEvent<number>).detail); addEventListener('parkar-outbox', f); return () => removeEventListener('parkar-outbox', f) }, [])
+  const net = !online || offline
   const tabs = routes.filter(v => v !== 'owner')
   return (
     <header className={'gh gh-' + view}>
@@ -262,7 +270,7 @@ function GateHeader({ view, routes, flow }: { view: View; routes: View[]; flow: 
         <span className="gh-mark"><img src="skc.png" alt="SKC" /></span>
         <b className="gh-name">PARKAR</b>
         <span className="gh-time num">{fmtTime(now)}</span>
-        <span className={'gh-net' + (online ? '' : ' off')}><i />{online ? 'Online' : 'Offline'}</span>
+        <span className={'gh-net' + (net ? ' off' : waiting ? ' wait' : '')}><i />{net ? 'Offline' : waiting ? 'Sending' : 'Online'}{waiting > 0 && <b className="num"> · {waiting}</b>}</span>
       </div>
       {((flow && flow !== 'Pay by UPI') || (!flow && tabs.length < 2)) && <div className={'gh-flow ' + view}><Ico n={view === 'entry' ? 'scan' : 'out'} size={18} />{view === 'entry' ? 'Entry gate' : 'Exit gate'}{flow && <small>· {flow}</small>}</div>}
       {!flow && tabs.length > 1 && <nav className="gh-tabs" aria-label="Choose gate">

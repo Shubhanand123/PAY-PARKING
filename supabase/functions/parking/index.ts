@@ -5,6 +5,7 @@ import {
 } from './razorpay.ts'
 import { loginAlias, pairedPassword } from '../../../src/parking-identity.ts'
 import * as parking from '../../../src/engine.ts'
+import { applyOp, offlineTicketId, type OfflineOp } from '../../../src/offline-sync.ts'
 
 const endpoint = Deno.env.get('SUPABASE_URL')!
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -210,7 +211,8 @@ async function state() {
 }
 
 function publishState(current: State, role: string) {
-  return { ...current, role, db: { ...current.db, razorpayEnabled: Boolean(razorpay), razorpayTest: Boolean(razorpay?.keyId.startsWith('rzp_test_')) } }
+  const { offlineSeen: _seen, ...db } = current.db
+  return { ...current, role, db: { ...db, razorpayEnabled: Boolean(razorpay), razorpayTest: Boolean(razorpay?.keyId.startsWith('rzp_test_')) } as parking.DB }
 }
 
 async function saveState(db: parking.DB, version: number) {
@@ -581,6 +583,56 @@ Deno.serve(async request => {
       return reply({ snapshot: publishState(await state(), role) })
     }
     if (action === 'snapshot') return reply({ snapshot: publishState(await state(), role) })
+    if (action === 'syncOffline') {
+      // Work a POS saved while it had no internet: recorded in order, at the time it happened, never twice.
+      if (!(role === 'open' || isGate(role) || role === 'owner')) return reply({ error: 'This device cannot send gate records.' }, 403)
+      const ops = args[0]
+      const okOp = (op: unknown): op is OfflineOp => {
+        if (!isObject(op)) return false
+        const o = op as Record<string, unknown>
+        return typeof o.opId === 'string' && /^[A-Za-z0-9-]{6,40}$/.test(o.opId)
+          && ['entry', 'cash', 'exit', 'print'].includes(o.kind as string)
+          && isInteger(o.at) && (o.at as number) > Date.now() - 14 * 24 * 3600_000 && (o.at as number) < Date.now() + 10 * 60_000
+          && (o.staffId === 'ravi' || o.staffId === 'sunil')
+          && typeof o.ticketId === 'string' && o.ticketId.length <= 30
+          && (o.kind !== 'entry' || (offlineTicketId.test(o.ticketId) && typeof o.plate === 'string' && o.plate.length <= 20 && typeof o.category === 'string' && o.category.length <= 30 && typeof o.token === 'string' && /^[a-f0-9]{32}$/.test(o.token)))
+          && (o.kind !== 'cash' || isInteger(o.paise))
+          && (o.what == null || o.what === 'slip' || o.what === 'receipt')
+          && (o.device == null || (typeof o.device === 'string' && o.device.length <= 40))
+      }
+      if (!Array.isArray(ops) || ops.length > 200 || !ops.every(okOp)) return reply({ error: 'Check the offline records and try again.' }, 400)
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { db, version } = await state()
+        const seen = new Set(db.offlineSeen ?? [])
+        const map: Record<string, string> = {}
+        // Offline tickets that were already inside elsewhere: keep pointing them to the server ticket.
+        for (const issue of db.offlineIssues ?? []) { const m = /\(([^)]+)\) but was already inside as (T-[A-Z0-9-]+)/.exec(issue.text); if (m) map[m[1]] = m[2] }
+        const issues: NonNullable<parking.DB['offlineIssues']> = []
+        for (const op of [...ops].sort((a, b) => a.at - b.at)) {
+          if (seen.has(op.opId)) continue
+          const problem = applyOp(db, op, map)
+          seen.add(op.opId)
+          if (problem) issues.push({ at: op.at, opId: op.opId, ticketId: op.ticketId, device: op.device, text: problem })
+        }
+        db.offlineSeen = [...seen].slice(-3000)
+        db.offlineIssues = [...(db.offlineIssues ?? []), ...issues].slice(-500)
+        const saved = await saveState(db, version)
+        if (saved) return reply({ result: { done: ops.map(op => op.opId), issues: issues.length }, snapshot: publishState(saved, role) })
+      }
+      return reply({ error: 'Another gate changed the records. Retrying shortly.' }, 409)
+    }
+    if (action === 'resolveOfflineIssue') {
+      if (role !== 'owner') return reply({ error: 'Only the Owner can mark these checked.' }, 403)
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { db, version } = await state()
+        const issue = (db.offlineIssues ?? []).find(i => i.opId === args[0])
+        if (!issue) return reply({ error: 'Not found.' }, 404)
+        issue.resolved = true
+        const saved = await saveState(db, version)
+        if (saved) return reply({ result: true, snapshot: publishState(saved, role) })
+      }
+      return reply({ error: 'Try again.' }, 409)
+    }
     if (!Object.hasOwn(actions, action)) return reply({ error: 'Unknown parking action.' }, 400)
     const command = actions[action as keyof typeof actions]
     // Open access covers the gates only. Rates, settings and the free list need the signed-in Owner.
