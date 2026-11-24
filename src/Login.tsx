@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { callParking } from './parking-api'
 import { auth, indianMobile } from './parking-auth'
-import { loginAlias } from './parking-identity'
+import { loginAlias, pairedPassword } from './parking-identity'
 import { Ico } from './ui'
 
 type Step = 'credential' | 'recovery' | 'owner-setup'
@@ -9,25 +9,27 @@ type Step = 'credential' | 'recovery' | 'owner-setup'
 const copy = {
   en: {
     subtitle: 'Sign in with your mobile number', title: 'Sign in',
-    mobile: 'Mobile number', owner: 'Owner dashboard', password: 'Enter your password',
-    forget: 'Forgot password?', code: 'Recovery code',
-    newPassword: 'Set Owner password', confirm: 'Confirm password',
-    save: 'Set password', back: 'Back', working: 'Checking…', old: 'Use existing owner setup',
+    mobile: 'Mobile number', owner: 'Owner dashboard', password: 'PIN',
+    forget: 'Forgot PIN / new device', code: 'One-time code',
+    newPassword: 'Set a 4-digit PIN', confirm: 'Confirm PIN',
+    save: 'Set PIN', back: 'Back', working: 'Checking…', old: 'Use existing owner setup',
     oldCode: 'Existing owner setup code',
-    failed: 'Sign-in failed. Check your number and credentials.', mismatch: 'The passwords do not match.',
-    saved: 'Password set. Sign in with your new password.', unavailable: 'Parking sign-in is unavailable.',
+    failed: 'Wrong number or PIN.', mismatch: 'The PINs do not match.',
+    saved: 'PIN set. Sign in with your PIN.', newDevice: 'Set up this device first: tap Forgot PIN / new device.', unavailable: 'Parking sign-in is unavailable.',
   },
   hi: {
     subtitle: 'अपने मोबाइल नंबर से साइन इन करें', title: 'साइन इन करें',
-    mobile: 'मोबाइल नंबर', owner: 'मालिक का डैशबोर्ड', password: 'अपना पासवर्ड डालें',
-    forget: 'पासवर्ड भूल गए?', code: 'रिकवरी कोड',
-    newPassword: 'नया पासवर्ड बनाएँ', confirm: 'पासवर्ड दोबारा डालें',
-    save: 'पासवर्ड बनाएँ', back: 'पीछे', working: 'जाँच हो रही है…', old: 'मौजूदा मालिक सेटअप का उपयोग करें',
+    mobile: 'मोबाइल नंबर', owner: 'मालिक का डैशबोर्ड', password: 'पिन',
+    forget: 'पिन भूल गए / नया डिवाइस', code: 'एक बार का कोड',
+    newPassword: '4 अंकों का पिन बनाएँ', confirm: 'पिन दोबारा डालें',
+    save: 'पिन बनाएँ', back: 'पीछे', working: 'जाँच हो रही है…', old: 'मौजूदा मालिक सेटअप का उपयोग करें',
     oldCode: 'मौजूदा मालिक सेटअप कोड',
-    failed: 'साइन इन नहीं हुआ। अपना नंबर और पासवर्ड जाँचें।', mismatch: 'दोनों पासवर्ड एक जैसे नहीं हैं।',
-    saved: 'पासवर्ड बन गया। नए पासवर्ड से साइन इन करें।', unavailable: 'अभी पार्किंग साइन इन उपलब्ध नहीं है।',
+    failed: 'नंबर या पिन गलत है।', mismatch: 'दोनों पिन एक जैसे नहीं हैं।',
+    saved: 'पिन बन गया। अब पिन से साइन इन करें।', newDevice: 'पहले यह डिवाइस सेट करें: पिन भूल गए / नया डिवाइस दबाएँ।', unavailable: 'अभी पार्किंग साइन इन उपलब्ध नहीं है।',
   },
 }
+
+const deviceKeyName = (mobile: string) => 'parking-owner-device:' + mobile
 
 export function Login({ onOwnerSetup, error }: {
   onOwnerSetup: (key: string) => Promise<void>
@@ -76,14 +78,17 @@ export function Login({ onOwnerSetup, error }: {
       }
       const mobile = indianMobile(identifier)
       if (recovering) {
-        await callParking('redeemOwnerCode', [mobile, normalizedCode, password], '')
+        const response = await callParking<{ deviceKey: string }>('redeemOwnerCode', [mobile, normalizedCode, password], '')
+        localStorage.setItem(deviceKeyName(mobile), response.result.deviceKey)
         localStorage.setItem('parking-last-mobile-owner', identifier)
         go('credential')
         setNotice(t.saved)
         return
       }
       if (!auth) throw new Error(t.unavailable)
-      const result = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password })
+      const deviceKey = localStorage.getItem(deviceKeyName(mobile))
+      if (!deviceKey) throw new Error(t.newDevice)
+      const result = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password: await pairedPassword(password, deviceKey) })
       if (result.error) throw new Error(t.failed)
       localStorage.setItem('parking-last-mobile-owner', identifier)
     } catch (failure) {
@@ -127,19 +132,19 @@ export function Login({ onOwnerSetup, error }: {
             autoCapitalize="none" spellCheck={false} maxLength={48} disabled={busy} required />
         </label>}
         <label className="setf"><span className="lbl">{credentialLabel}</span>
-          <input key={step} className="field" type="password"
+          <input key={step} className={'field' + (step === 'owner-setup' ? '' : ' pin-field')} type="password"
             autoComplete={recovering ? 'new-password' : step === 'owner-setup' ? 'off' : 'current-password'}
-            minLength={recovering ? 10 : undefined}
-            value={password} onChange={event => setPassword(event.target.value)}
+            inputMode={step === 'owner-setup' ? undefined : 'numeric'} maxLength={step === 'owner-setup' ? undefined : 4}
+            value={password} onChange={event => setPassword(step === 'owner-setup' ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 4))}
             disabled={busy} required />
         </label>
         {recovering && <label className="setf"><span className="lbl">{t.confirm}</span>
-          <input className="field" type="password"
-            autoComplete="new-password" value={confirm} onChange={event => setConfirm(event.target.value)}
+          <input className="field pin-field" type="password" inputMode="numeric" maxLength={4}
+            autoComplete="new-password" value={confirm} onChange={event => setConfirm(event.target.value.replace(/\D/g, '').slice(0, 4))}
             disabled={busy} required />
         </label>}
         <button className="btn btn-primary" disabled={busy || (step === 'owner-setup' ? !password.trim()
-          : !validMobile || (recovering ? !validCode || password.length < 10 || !confirm : !password))}>
+          : !validMobile || (recovering ? !validCode || password.length !== 4 || confirm.length !== 4 : password.length !== 4))}>
           {busy ? t.working : recovering ? t.save : t.title}
         </button>
         {step === 'credential' && <button type="button" className="link" disabled={busy} onClick={() => go('recovery')}>{t.forget}</button>}

@@ -69,25 +69,31 @@ function verifiedSessionId(token: string) {
 }
 
 async function redeemOwnerCode(args: unknown[]) {
-  const [mobile, rawCode, password] = args
+  // The third value is a 4–8 digit PIN (approves this device) or, for older pages, a long password.
+  const [mobile, rawCode, secret] = args
   const code = typeof rawCode === 'string' ? rawCode.replace(/[\s-]/g, '').toLowerCase() : ''
-  if (!validMobile(mobile) || !/^[a-f0-9]{32}$/.test(code) || !validOwnerPassword(password)) {
-    return reply({ error: 'Enter the Owner mobile number, the full recovery code, and a password of at least 10 characters.' }, 400)
+  const isPin = typeof secret === 'string' && /^\d{4,8}$/.test(secret)
+  if (!validMobile(mobile) || !/^[a-f0-9]{32}$/.test(code) || !(isPin || validOwnerPassword(secret))) {
+    return reply({ error: 'Enter the Owner mobile number, the full one-time code, and a PIN of 4 to 8 digits.' }, 400)
   }
   const now = new Date().toISOString()
   const codeHash = await hashCode(code)
   const query = new URLSearchParams({ mobile: 'eq.' + mobile, code_hash: 'eq.' + codeHash, expires_at: 'gt.' + now, used_at: 'is.null' })
-  const [pending] = await database<Array<{ mobile: string }>>('parking_owner_recovery?select=mobile&' + query)
+  const [pending] = await database<Array<{ mobile: string; device_key: string | null }>>('parking_owner_recovery?select=mobile,device_key&' + query)
   if (!pending) return reply({ error: 'This recovery code is invalid, expired, or already used.' }, 400)
   const email = loginAlias(mobile)
   const existing = (await authUsers()).find(user => user.email === email)
   if (existing && existing.app_metadata?.parking_role !== 'owner') return reply({ error: 'This mobile number is assigned to a POS account.' }, 409)
 
+  const deviceKey = pending.device_key ?? randomToken()
   const [claimed] = await database<Array<{ mobile: string }>>('parking_owner_recovery?select=mobile&' + query, {
     method: 'PATCH', headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({ used_at: now, invalidate_before: now }),
+    body: JSON.stringify({ used_at: now, invalidate_before: now, ...(isPin ? { device_key: deviceKey } : {}) }),
   })
   if (!claimed) return reply({ error: 'This recovery code is invalid, expired, or already used.' }, 400)
+  // PIN sign-in: the real password is derived from the Owner's device key plus the PIN, so a short PIN
+  // only works on devices that received the key through a one-time code. All approved devices share it.
+  const password = isPin ? await pairedPassword(secret, deviceKey) : secret as string
   const response = await authRequest(existing ? 'admin/users/' + existing.id : 'admin/users', {
     method: existing ? 'PUT' : 'POST',
     body: JSON.stringify(existing ? { password } : {
@@ -102,7 +108,7 @@ async function redeemOwnerCode(args: unknown[]) {
       body: JSON.stringify({ invalidate_before: new Date().toISOString() }),
     })
   }
-  return reply({ result: true })
+  return reply({ result: isPin ? { deviceKey } : true })
 }
 
 async function redeemPosCode(args: unknown[]) {
