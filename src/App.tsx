@@ -1,7 +1,7 @@
 import { auth } from './parking-auth'
 import { Login } from './Login'
 import { apiEnabled, callParking, currentSnapshot, deviceKey, isOfflineError, openAccess, outbox, ParkingApiError, setDeviceKey, syncOutbox, type Snapshot } from './parking-api'
-import { nativeApp } from './native'
+import { nativeApp, PlateReader } from './native'
 import { fmtTime, type DB } from './engine'
 import { useCallback, useEffect, useState } from 'react'
 import { useDB, useNow, Ico, Toast } from './ui'
@@ -233,6 +233,7 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
   const say = useCallback((m: string, bad?: boolean) => setToast({ m, bad }), [])
   const done = useCallback(() => setToast(null), [])
 
+  if (r === 'printer-test') return <PrinterTest />
   if (r.startsWith('t/')) return (
     <div className="screen">
       <header className="hero slim"><div className="glow g1" /><div className="hero-row"><div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.siteName}</div></div><h1>Your parking ticket</h1></header>
@@ -324,4 +325,30 @@ function PosSetup({ error }: { error: string }) {
       {(msg || (error && !/not set up/i.test(error))) && <p className="msg bad" role="alert">{msg || error}</p>}
     </section></main>
   </div>
+}
+
+/** #/printer-test : what the POS reports about its printer, and a one-line test print. For setting up silent printing. */
+function PrinterTest() {
+  const [lines, setLines] = useState<string[]>([])
+  const add = (t: string) => setLines(l => [...l, new Date().toLocaleTimeString() + '  ' + t])
+  const info = async () => {
+    if (!nativeApp) { add('Not inside the PARKER app (this is a browser).'); return }
+    try { add('App version: ' + JSON.stringify(await PlateReader.version())) } catch (e) { add('Version: ' + String(e)) }
+    try { add('Printer: ' + JSON.stringify(await PlateReader.printerInfo())) } catch (e) { add('printerInfo failed: ' + String((e as Error)?.message ?? e) + ' (APK older than 2.7?)') }
+  }
+  const test = async () => {
+    const c = document.createElement('canvas'); c.width = 384; c.height = 120
+    const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, 384, 120); g.fillStyle = '#000'
+    g.font = 'bold 30px sans-serif'; g.fillText('PARKER test', 70, 50); g.font = '20px sans-serif'; g.fillText(new Date().toLocaleString('en-IN'), 60, 90)
+    try { add('Direct print: ' + JSON.stringify(await PlateReader.printImage({ image: c.toDataURL('image/png') }))) }
+    catch (e) { add('Direct print failed: ' + String((e as Error)?.message ?? e)) }
+  }
+  useEffect(() => { void info() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return <main className="screen"><div className="content" style={{ paddingTop: 16 }}><section className="card stack">
+    <h2>Printer test</h2>
+    <button className="btn btn-primary btn-xl" onClick={() => void test()}>Print a test line</button>
+    <button className="btn btn-ghost" onClick={() => void info()}>Check printer again</button>
+    <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>{lines.join('\n') || 'Checking…'}</pre>
+    <a className="link" href="#/entry">Back to Entry</a>
+  </section></div></main>
 }
