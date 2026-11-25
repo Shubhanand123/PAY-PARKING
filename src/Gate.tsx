@@ -25,7 +25,6 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
   const tv = db.tariffs.find(x => x.id === t.tariffId)
   const rt = tv?.rates[t.category]
   const paidBy = (p: Receipt['payments'][number]) => p.kind === 'prepaid' ? 'Paid at entry' : p.phone ? `Paid online${p.at ? ' · ' + fmtTime(p.at) : ''}` : p.method === 'razorpay' ? 'Paid by UPI' : 'Paid in cash'
-  const paidTotal = r.payments.reduce((sum, p) => sum + p.amountPaise, 0)
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
@@ -49,7 +48,6 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
       <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(r.totalPaise)}</b></div>
       {r.payments.length > 0 && <div className="slip-paid-h">PAYMENTS</div>}
       {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{paidBy(p)}</span><b>{rupees(p.amountPaise)}</b></div>)}
-      {!r.free && paidTotal >= r.totalPaise && <div className="slip-stamp">PAID IN FULL · {rupees(paidTotal)}</div>}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
       <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
       <div className="slip-foot"><b>Thank you for parking with us!</b><br />Drive safe · Issued by {r.issuedBy}</div>
@@ -102,8 +100,8 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
           {t.prepaidHours > 0 && <><br />Prepaid time is not refunded; extra time is charged at exit.</>}
         </div>
       </>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to check your time and amount to pay.' : <><b>SCAN TO PAY ONLINE</b><br />See your time and amount, and pay by UPI or card before you leave. Skip the queue at the exit.</>}</span></div>
-      {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Paid online? Collect your receipt at the exit gate.<br />Thank you · Drive safe</div>}
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to check your time and amount to pay.' : 'Scan to see your receipt and pay.'}</span></div>
+      {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Show it at the exit gate.<br />Thank you · Drive safe</div>}
     </div>
   )
 }
