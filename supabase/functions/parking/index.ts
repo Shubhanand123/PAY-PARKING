@@ -192,6 +192,8 @@ function valid(kind: string, value: unknown, db: parking.DB): boolean {
 }
 
 type State = { version: number; db: parking.DB }
+const deviceCache = new Map<string, { device: { role: string; label: string }; at: number }>()
+const deviceCacheMs = Number(Deno.env.get('PARKING_DEVICE_CACHE_MS') ?? 20_000)
 // The gate lock is read at most every 10 s, so open-gate requests stay fast.
 let lockCache = { value: false, at: 0 }
 async function gatesLocked() {
@@ -252,8 +254,20 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
     const found = await capturedQrPayment(razorpay, payload.qr_id, payload.amount as number).catch(() => undefined)
     if (!found) return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
   }
+  // Making the UPI QR at Razorpay takes about a second: start it now, while the records are read, instead of after.
+  // If the ticket turns out to already have a QR, or the amount is wrong, this early QR is closed again.
+  let early: Promise<Awaited<ReturnType<typeof createRazorpayQr>> | undefined> | undefined
+  if (action === 'create-order' && actor && payload.upi_qr === true && typeof payload.amount === 'number' && Number.isSafeInteger(payload.amount) && payload.amount >= 100 && payload.receipt === ticketId) {
+    early = createRazorpayQr(razorpay, payload.amount, ticketId as string).catch((error: unknown) => {
+      console.error('Razorpay UPI QR failed for ' + ticketId + ': ' + (error instanceof Error ? error.message : String(error)))
+      return undefined
+    })
+  }
+  let earlyUsed = false
+  const dropEarly = () => { if (early && !earlyUsed) { earlyUsed = true; void early.then(qr => qr && closeRazorpayQr(razorpay!, qr.id)).catch(() => {}) } }
   const initial = await state()
   const ticket = select(initial.db)
+  if (!ticket) dropEarly()
   if (!ticket) return reply({ error: 'Ticket not found.' }, actor ? 404 : 401)
 
   if (action === 'create-order') {
@@ -265,8 +279,9 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
     for (let attempt = 0; attempt < 5; attempt++) {
       const { db, version } = attempt === 0 ? initial : await state()
       const fresh = select(db)
-      if (!fresh || fresh.status !== 'inside') return reply({ error: 'This ticket is no longer awaiting payment.' }, 409)
+      if (!fresh || fresh.status !== 'inside') { dropEarly(); return reply({ error: 'This ticket is no longer awaiting payment.' }, 409) }
       if (fresh.onlineCheckout) {
+        dropEarly()
         const order = fresh.onlineCheckout
         if (order.amount !== amount) return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
         return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId, link_url: order.linkUrl, upi_qr: order.upiQr, qr_image: order.qrImage })
@@ -275,6 +290,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       const billedAt = Date.now()
       const bill = parking.billFor(db, fresh, billedAt)
       if (amount !== bill.duePaise || providerOrder && providerOrder.revision !== fresh.rev) {
+        dropEarly()
         return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
       }
       if (!providerOrder) {
@@ -282,7 +298,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
         const quote = { amount, currency, receipt: receiptId, billedAt, totalPaise: bill.totalPaise } as const
         // UPI QR needs Razorpay's QR Codes feature on the account; without it, fall back to a payment link shown as a QR.
         let qrError = ''
-        const qr = payload.upi_qr === true ? await createRazorpayQr(razorpay, amount, fresh.id).catch((error: unknown) => {
+        const qr = early && !earlyUsed ? (earlyUsed = true, await early) : payload.upi_qr === true ? await createRazorpayQr(razorpay, amount, fresh.id).catch((error: unknown) => {
           qrError = error instanceof Error ? error.message : String(error)
           console.error('Razorpay UPI QR failed for ' + fresh.id + ': ' + qrError)
           return undefined
@@ -539,8 +555,13 @@ Deno.serve(async request => {
       if (!/^[a-f0-9]{64}$/.test(key)) return reply({ error: 'Sign in to continue.' }, 401)
       const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)))
       digest = Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
-      const [device] = await database<Array<{ role: string; label: string }>>('parking_devices?enabled=eq.true&select=role,label&key_hash=eq.' + digest)
-      if (!device) return reply({ error: 'This setup code is invalid or revoked.' }, 401)
+      // An approved POS is remembered for 20 s, so each tap skips one trip to the database.
+      // A POS removed in the dashboard stops working within 20 s.
+      const cached = deviceCache.get(digest)
+      const device = cached && Date.now() - cached.at < deviceCacheMs ? cached.device
+        : (await database<Array<{ role: string; label: string }>>('parking_devices?enabled=eq.true&select=role,label&key_hash=eq.' + digest))[0]
+      if (!device) { deviceCache.delete(digest); return reply({ error: 'This setup code is invalid or revoked.' }, 401) }
+      if (!cached || cached.device !== device) deviceCache.set(digest, { device, at: Date.now() })
       role = device.role
       deviceLabel = device.label
     }

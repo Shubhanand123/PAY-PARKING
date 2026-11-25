@@ -8,6 +8,7 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
   const keySecret = 'local-fixture-secret'
   const env: Record<string, string> = {
     SUPABASE_URL: 'https://parking.test',
+    PARKING_DEVICE_CACHE_MS: '0',
     SUPABASE_SERVICE_ROLE_KEY: 'local-service',
     RAZORPAY_KEY_ID: keyId,
     RAZORPAY_KEY_SECRET: keySecret,
