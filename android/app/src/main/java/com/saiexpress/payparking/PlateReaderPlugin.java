@@ -116,6 +116,7 @@ public class PlateReaderPlugin extends Plugin {
                 String[] list = data.getStringArrayExtra(PlateScanActivity.RESULT_ALTERNATIVES);
                 if (list != null) for (String p : list) alternatives.put(p);
                 out.put("alternatives", alternatives);
+                if (data.hasExtra(PlateScanActivity.RESULT_PICTURE)) out.put("picture", data.getStringExtra(PlateScanActivity.RESULT_PICTURE));
             }
         } else {
             out.put("cancelled", true);

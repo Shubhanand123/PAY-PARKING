@@ -454,6 +454,23 @@ async function hmacHex(secret: string, message: string) {
 }
 
 /** UPI payments the operator confirmed: complete them when Razorpay confirms; flag them if Razorpay never does. */
+// Saved scans are kept 30 days. The keep-awake ping (every 4 min) runs this at most every 6 hours.
+let lastScanCleanup = 0
+async function cleanOldScans() {
+  if (Date.now() - lastScanCleanup < 6 * 3600_000) return
+  lastScanCleanup = Date.now()
+  const before = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
+  const old = await database<Array<{ id: number; path: string }>>('parking_scans?select=id,path&order=created_at.asc&limit=500&created_at=lt.' + before)
+  if (!old.length) return
+  const removed = await fetch(endpoint + '/storage/v1/object/scans', {
+    method: 'DELETE', headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefixes: old.map(row => row.path) }),
+  })
+  if (!removed.ok) throw new Error('storage delete ' + removed.status)
+  await database('parking_scans?id=in.(' + old.map(row => row.id).join(',') + ')', { method: 'DELETE', headers: { Prefer: 'return=representation' } })
+  console.log('Deleted ' + old.length + ' scans older than 30 days')
+}
+
 async function reconcileUpi(onlyQr?: string) {
   if (!razorpay) return
   const { db, version } = await state()
@@ -523,7 +540,11 @@ Deno.serve(async request => {
     const body = JSON.parse(raw)
     const subroute = new URL(request.url).pathname.split('/').at(-1)
     // Keep-awake ping (a scheduled job calls this every few minutes so the first payment is not slow).
-    if (body?.action === 'ping') { await reconcileUpi().catch(error => console.error('UPI reconcile failed: ' + error)); return reply({ ok: true }) }
+    if (body?.action === 'ping') {
+      await reconcileUpi().catch(error => console.error('UPI reconcile failed: ' + error))
+      await cleanOldScans().catch(error => console.error('Scan clean-up failed: ' + error))
+      return reply({ ok: true })
+    }
     // Razorpay webhook: Razorpay tells us the moment a QR is paid, so the gate turns Paid without waiting for a poll.
     if (subroute === 'razorpay-webhook') return await razorpayWebhook(request, raw, body)
     const action = isPaymentRoute(subroute) ? subroute : body?.action
@@ -608,6 +629,24 @@ Deno.serve(async request => {
     // Gates locked by the Owner: only approved POS machines (device key) or signed-in accounts may use the gates.
     if (role === 'open' && await gatesLocked()) {
       return reply({ error: 'This POS is not set up yet. Scan its setup QR from the Owner dashboard (POS devices).', code: 'POS_NOT_APPROVED' }, 403)
+    }
+    // Training data: the plate picture from a scan, what the scanner read, and the plate the operator saved.
+    if (action === 'saveScan') {
+      if (!['entry', 'both', 'owner', 'open'].includes(role)) return reply({ error: 'This device cannot save scans.' }, 403)
+      const [ticketId, read, image] = args
+      if (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId) || typeof read !== 'string' || !/^[A-Z0-9]{0,20}$/.test(read)
+        || typeof image !== 'string' || image.length > 200_000 || !/^[A-Za-z0-9+/=]+$/.test(image)) return reply({ error: 'Invalid scan.' }, 400)
+      const bytes = Uint8Array.from(atob(image), c => c.charCodeAt(0))
+      if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return reply({ error: 'The scan picture must be a JPEG.' }, 400)
+      const ticket = (await state()).db.tickets.find(t => t.id === ticketId)
+      if (!ticket) return reply({ error: 'Ticket not found.' }, 404)
+      const path = new Date().toISOString().slice(0, 10) + '/' + ticketId + '-' + crypto.randomUUID().slice(0, 8) + '.jpg'
+      const upload = await fetch(endpoint + '/storage/v1/object/scans/' + path, {
+        method: 'POST', headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'image/jpeg' }, body: bytes,
+      })
+      if (!upload.ok) return reply({ error: 'The scan could not be stored.' }, 502)
+      await database('parking_scans', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ path, read_plate: read, confirmed_plate: ticket.plate, ticket_id: ticketId }) })
+      return reply({ result: { saved: true } })
     }
     if (action === 'setGateLock') {
       if (role !== 'owner') return reply({ error: 'Only the Owner can lock the gates.' }, 403)

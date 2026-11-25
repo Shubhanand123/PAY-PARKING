@@ -1,6 +1,6 @@
 import { RazorpayCheckout } from './RazorpayCheckout'
 import { PosPay } from './PosPay'
-import { apiEnabled, callParkingPayment } from './parking-api'
+import { apiEnabled, callParking, callParkingPayment } from './parking-api'
 import { setBusy as markBusy } from './updater'
 import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
@@ -120,6 +120,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
   const [scanning, setScanning] = useState(false)
   const [alternatives, setAlternatives] = useState<string[]>([])
   const inp = useRef<HTMLInputElement>(null)
+  const scanSample = useRef<{ read: string; picture: string } | null>(null) // last scan's plate picture, for training
   const chk = plate ? checkPlate(plate) : null
   const validPlate = isSupportedPlateFormat(plate)
   const already = plate.length >= 4 ? findActiveByPlate(db, plate) : undefined
@@ -142,6 +143,9 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
       try { navigator.vibrate?.(r.duplicate ? [40, 60, 40] : 35) } catch { /* no vibration */ }
       if (r.duplicate) alreadyInside(prettyPlate(r.ticket.plate), `Came in at ${fmtTime(r.ticket.entryAt)} · Ticket ${r.ticket.id}`)
       else void printSlip().then(() => print(r.ticket)) // the slip prints by itself; Reprint stays on screen
+      // Training data (owner agreed): the scan's plate picture, what the scanner read and the plate saved. Kept 30 days.
+      const sample = scanSample.current; scanSample.current = null
+      if (sample && !r.duplicate && apiEnabled) void callParking('saveScan', [r.ticket.id, normPlate(sample.read), sample.picture]).catch(() => {})
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
   const print = async (t: Ticket) => {
@@ -153,7 +157,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
       toast((error as Error).message, true)
     }
   }
-  const next = () => { setDone(null); setPlate(''); setConf(null); setAlternatives([]); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); window.scrollTo({ top: 0, behavior: 'smooth' }) } // no keyboard: the next vehicle starts with Scan plate
+  const next = () => { scanSample.current = null; setDone(null); setPlate(''); setConf(null); setAlternatives([]); setCat(''); setHours(1); setPaymentTiming('exit'); setPrintFail(false); window.scrollTo({ top: 0, behavior: 'smooth' }) } // no keyboard: the next vehicle starts with Scan plate
 
   if (done) {
     const t = db.tickets.find(x => x.id === done.t.id) ?? done.t
@@ -179,6 +183,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
           setPlate(result.plate)
           setConf(result.confidence)
           setAlternatives(result.alternatives)
+          scanSample.current = result.picture ? { read: result.plate, picture: result.picture } : null
         }} />}
         <label className="lbl" htmlFor="plate">Vehicle number</label>
         <input id="plate" ref={inp} className="field plate-field" value={plate} inputMode="text" enterKeyHint="done" autoCapitalize="characters" autoComplete="off"

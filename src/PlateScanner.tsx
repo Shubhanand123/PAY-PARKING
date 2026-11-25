@@ -6,7 +6,7 @@ import { cropGray, estimateSkew, findRowSplit, locatePlate, otsu, textBlock, toG
 import { Ico } from './ui'
 import { nativeApp, nativeScan } from './native'
 
-export type ScanResult = PlateReading & { alternatives: string[] }
+export type ScanResult = PlateReading & { alternatives: string[]; picture?: string /* plate picture (JPEG base64), saved for training */ }
 
 type Source = { image: CanvasImageSource; width: number; height: number }
 type Layout = 'line' | 'block'
@@ -438,7 +438,7 @@ function NativePlateScanner({ onRead, onClose, onQr }: ScannerProps) {
       if (!alive) return
       const { onRead, onClose, onQr } = callbacks.current
       if (result.qr !== undefined) { if (!onQr?.(result.qr)) onClose(); return }
-      if (result.plate) onRead({ plate: result.plate, confidence: .9, alternatives: result.alternatives ?? [] })
+      if (result.plate) onRead({ plate: result.plate, confidence: .9, alternatives: result.alternatives ?? [], picture: result.picture })
       else onClose()
     }).catch(() => { if (alive) callbacks.current.onClose() })
     return () => { alive = false }

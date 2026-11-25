@@ -2,7 +2,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core'
 
 // Inside the Android app, plates are read by the native ML Kit scanner (fast, offline).
 // In a normal browser this file does nothing and the web scanner is used.
-export type NativeScan = { plate?: string; alternatives?: string[]; qr?: string; cancelled?: boolean }
+export type NativeScan = { plate?: string; alternatives?: string[]; qr?: string; cancelled?: boolean; picture?: string /* small JPEG, base64 */ }
 type PlateReaderPlugin = {
   scan(options: { qr: boolean; title: string }): Promise<NativeScan>
   version(): Promise<{ versionCode: number; versionName: string }>

@@ -64,7 +64,19 @@ import java.util.concurrent.Executors;
  */
 public class PlateScanActivity extends AppCompatActivity {
     static final String EXTRA_QR = "qr", EXTRA_TITLE = "title";
-    static final String RESULT_PLATE = "plate", RESULT_ALTERNATIVES = "alternatives", RESULT_QR = "qr";
+    static final String RESULT_PLATE = "plate", RESULT_ALTERNATIVES = "alternatives", RESULT_QR = "qr", RESULT_PICTURE = "picture";
+    private volatile Bitmap lastPicture;
+
+    /** The plate picture as a small JPEG (at most 320 px wide, ~10-20 KB), base64. Saved with the entry for training. */
+    static String smallJpeg(Bitmap b) {
+        if (b == null) return null;
+        try {
+            Bitmap s = b.getWidth() > 320 ? Bitmap.createScaledBitmap(b, 320, Math.max(1, Math.round(b.getHeight() * 320f / b.getWidth())), true) : b;
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            s.compress(Bitmap.CompressFormat.JPEG, 75, out);
+            return out.size() < 140_000 ? android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP) : null;
+        } catch (Throwable e) { return null; }
+    }
 
     private final ExecutorService analysis = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -251,11 +263,13 @@ public class PlateScanActivity extends AppCompatActivity {
         try { Tasks.await(Tasks.whenAllComplete(reading, codes)); } catch (Exception ignored) { /* handled below */ }
         readerMs = (System.nanoTime() - t1) / 1_000_000;
         lastBoxed = usedFinder;
+        final Bitmap readFrom = band;
         main.post(() -> {
             if (finished) return;
             if (codes.isSuccessful()) for (Barcode code : codes.getResult()) {
                 if (code.getRawValue() != null) { finishWith(null, null, code.getRawValue()); return; }
             }
+            lastPicture = readFrom; // the picture this reading came from (kept for training the plate reader)
             if (reading.isSuccessful()) onText(reading.getResult(), width, height);
         });
     }
@@ -323,6 +337,8 @@ public class PlateScanActivity extends AppCompatActivity {
         }
         data.putExtra(RESULT_PLATE, plate);
         data.putExtra(RESULT_ALTERNATIVES, alternatives.toArray(new String[0]));
+        String picture = smallJpeg(lastPicture);
+        if (picture != null) data.putExtra(RESULT_PICTURE, picture);
         setResult(RESULT_OK, data);
         overlay.setState(ScanOverlay.State.DONE, pretty(plate));
         // Timing line, so the speed can be checked at the gate.
