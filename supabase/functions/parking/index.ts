@@ -70,6 +70,31 @@ function verifiedSessionId(token: string) {
   try { return JSON.parse(atob(payload)).session_id } catch { return undefined }
 }
 
+/** Owner PIN on a new device: checks the PIN with Supabase Auth and, if right, hands over the Owner's device key. */
+async function ownerPinKey(args: unknown[]) {
+  const [mobile, pin] = args
+  if (!validMobile(mobile) || typeof pin !== 'string' || !/^\d{4,8}$/.test(pin)) return reply({ error: 'Enter the Owner mobile number and PIN.' }, 400)
+  const query = 'parking_owner_recovery?mobile=eq.' + encodeURIComponent(mobile)
+  const [row] = await database<Array<{ device_key: string | null; failed_attempts: number; locked_until: string | null }>>(query + '&select=device_key,failed_attempts,locked_until')
+  if (!row?.device_key) return reply({ error: 'Set the Owner PIN first: tap Forgot PIN / new device and use a one-time code.' }, 400)
+  if (row.locked_until && new Date(row.locked_until).getTime() > Date.now()) {
+    const minutes = Math.ceil((new Date(row.locked_until).getTime() - Date.now()) / 60000)
+    return reply({ error: `Too many wrong PINs. Try again in ${minutes} min.` }, 429)
+  }
+  const check = await fetch(endpoint + '/auth/v1/token?grant_type=password', {
+    method: 'POST', headers: { apikey: serviceKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: loginAlias(mobile as string), password: await pairedPassword(pin, row.device_key) }),
+  })
+  if (!check.ok) {
+    const failed = (row.failed_attempts ?? 0) + 1
+    await database(query, { method: 'PATCH', headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(failed >= 5 ? { failed_attempts: 0, locked_until: new Date(Date.now() + 15 * 60000).toISOString() } : { failed_attempts: failed }) })
+    return reply({ error: failed >= 5 ? 'Too many wrong PINs. Try again in 15 min.' : 'Wrong number or PIN.' }, 401)
+  }
+  if (row.failed_attempts) await database(query, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ failed_attempts: 0, locked_until: null }) })
+  return reply({ result: { deviceKey: row.device_key } })
+}
+
 async function redeemOwnerCode(args: unknown[]) {
   // The third value is a 4–8 digit PIN (approves this device) or, for older pages, a long password.
   const [mobile, rawCode, secret] = args
@@ -566,6 +591,7 @@ Deno.serve(async request => {
       return reply({ db: { ...db, razorpayEnabled: Boolean(razorpay), seq: 0, tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }], payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })), tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [] } })
     }
     if (action === 'redeemOwnerCode') return await redeemOwnerCode(args)
+    if (action === 'ownerPinKey') return await ownerPinKey(args)
     if (action === 'redeemPosCode') return await redeemPosCode(args)
     if (action === 'pairPosDevice') {
       const [code] = args

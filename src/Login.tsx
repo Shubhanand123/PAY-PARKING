@@ -86,8 +86,12 @@ export function Login({ onOwnerSetup, error }: {
       }
       const auth = await loadAuth()
       if (!auth) throw new Error(t.unavailable)
-      const deviceKey = localStorage.getItem(deviceKeyName(mobile))
-      if (!deviceKey) throw new Error(t.newDevice)
+      let deviceKey = localStorage.getItem(deviceKeyName(mobile))
+      if (!deviceKey) {
+        // A new device: the server checks the PIN and hands over the Owner key, so one PIN works everywhere.
+        deviceKey = (await callParking<{ deviceKey: string }>('ownerPinKey', [mobile, password], '')).result.deviceKey
+        localStorage.setItem(deviceKeyName(mobile), deviceKey)
+      }
       const result = await auth.auth.signInWithPassword({ email: loginAlias(mobile), password: await pairedPassword(password, deviceKey) })
       if (result.error) throw new Error(t.failed)
       localStorage.setItem('parking-last-mobile-owner', identifier)
