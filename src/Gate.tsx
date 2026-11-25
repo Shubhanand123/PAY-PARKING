@@ -515,46 +515,71 @@ export function StatusPill({ t }: { t: Ticket }) {
 }
 
 // ---------- customer QR page ----------
+// What the customer sees on their phone after scanning the slip QR: their vehicle, time parked,
+// what they pay if they leave now, and the rates. Refreshes every 30 s.
 export function Customer({ db, token }: { db: DB; token: string }) {
   const now = useNow(30000)
   const t = db.tickets.find(x => x.token === token)
-  if (!t) return <div className="card center"><h2>Ticket not found</h2><p className="muted">Ask the attendant at the gate.</p></div>
+  if (!t) return <div className="cp-card cp-center"><h2>Ticket not found</h2><p className="muted">Please ask the attendant at the gate.</p></div>
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const r = tv.rates[t.category]
+  const cat = db.categories.find(c => c.id === t.category)
   const b = billFor(db, t, now)
+  const end = t.exitAt ?? (t.status === 'inside' ? now : t.billedAt ?? now)
+  const minutes = Math.max(0, (end - t.entryAt) / 60000)
+  const extra = Math.max(0, Math.ceil(minutes / 60) - r.firstHours)
+  const inGrace = minutes <= tv.graceMin
+  const s = db.settings
+  const status = t.status === 'inside' ? { tone: 'live', text: 'Parked' } : t.status === 'paid' ? { tone: 'ok', text: 'Paid' } : t.status === 'exited' ? { tone: 'done', text: 'Left' } : { tone: 'bad', text: 'Cancelled' }
   return (
-    <div className="stack">
-      <div className="card">
-        <div className="tk-head"><div><div className="muted small">{db.settings.siteName}</div><div className="plate-big">{prettyPlate(t.plate)}</div></div><StatusPill t={t} /></div>
-        <dl className="kv">
-          <div><dt>Ticket</dt><dd>{t.id}</dd></div>
-          <div><dt>Entered</dt><dd>{fmtDT(t.entryAt)}</dd></div>
-          {t.exitAt && <div><dt>Left</dt><dd>{fmtDT(t.exitAt)}</dd></div>}
-          <div><dt>Time</dt><dd>{dur((t.exitAt ?? now) - t.entryAt)}</dd></div>
-        </dl>
-      </div>
-      <div className="card">
+    <div className="cp">
+      <section className="cp-card cp-veh">
+        <div className="cp-veh-top">
+          <span className="cp-veh-ico"><Ico n={cat?.icon ?? 'car'} size={30} /></span>
+          <div className="cp-veh-txt"><small>{cat?.name}</small><span className="hsrp cp-plate"><i />{prettyPlate(t.plate)}</span></div>
+          <span className={'cp-status ' + status.tone}>{status.tone === 'live' && <i />}{status.text}</span>
+        </div>
+        <TimeStrip from={t.entryAt} to={end} live={t.status === 'inside'} />
+        <div className="cp-meta"><span>Ticket <b>{t.id}</b></span><span>{t.entryGate}</span></div>
+      </section>
+
+      <section className={'cp-card cp-pay ' + status.tone}>
         {t.status === 'inside' && <>
-          <div className="muted small">{t.onlineCheckout ? 'Amount to pay' : 'Estimate if you leave now'}</div>
-          <div className="amount">{rupees(b.duePaise)}</div>
+          <small>{t.onlineCheckout ? 'Amount to pay' : 'To pay if you leave now'}</small>
+          <div className="cp-amount num">{rupees(b.duePaise)}</div>
+          {inGrace && <p className="cp-note ok">Free if you leave within {tv.graceMin} min of entry.</p>}
+          {b.lines.length > 0 && <div className="cp-lines">{b.lines.map((l, i) => <div key={i}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}</div>}
           {db.razorpayEnabled && t.onlineCheckout
-            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={db.settings.operator} hasOrder linkUrl={t.onlineCheckout.linkUrl} upiQr={t.onlineCheckout.upiQr} qrImage={t.onlineCheckout.qrImage} />
-            : <p className="tiny muted">{db.razorpayEnabled ? 'Ask the exit attendant to enable online payment when you are ready to leave.' : 'Pay the attendant at the exit gate.'}</p>}
+            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={s.operator} hasOrder linkUrl={t.onlineCheckout.linkUrl} upiQr={t.onlineCheckout.upiQr} qrImage={t.onlineCheckout.qrImage} />
+            : <p className="cp-note">Pay at the exit gate by <b>UPI</b> or <b>cash</b>. Show your slip there.</p>}
         </>}
-        {(t.status === 'paid' || t.status === 'exited') && <><div className="muted small">Paid</div><div className="amount ok">{rupees(t.totalPaise ?? 0)}</div></>}
-        {t.status === 'cancelled' && <p>This ticket was cancelled.</p>}
-      </div>
-      <div className="card">
-        <h2>Rates for this ticket</h2>
-        <ul className="rules">
-          <li>First {r.firstHours} hours: <b>{rupees(r.firstPaise)}</b></li>
-          <li>Each started hour after that: <b>{rupees(r.perHourPaise)}</b></li>
-          <li>Free if you leave within <b>{tv.graceMin} minutes</b></li>
-          {r.capPaise > 0 && <li>Maximum <b>{rupees(r.capPaise)}</b> per 24 hours</li>}
-          {t.prepaidHours > 0 && <li>You prepaid {t.prepaidHours}h. No refund for leaving early; extra time is charged at exit.</li>}
-        </ul>
-        <p className="tiny muted">Rates are fixed at the time you entered (version {tv.version}). Example: in at 10:00, out at 11:20 → {rupees(charge(80, r, tv.graceMin).total)}.</p>
-      </div>
+        {(t.status === 'paid' || t.status === 'exited') && <>
+          <span className="cp-tick"><Ico n="check" size={26} /></span>
+          <small>Paid</small>
+          <div className="cp-amount num">{rupees(t.totalPaise ?? 0)}</div>
+          <p className="cp-note">{t.status === 'paid' ? 'Thank you! You can leave now.' : 'Thank you for parking with us. Drive safe!'}</p>
+        </>}
+        {t.status === 'cancelled' && <p className="cp-note">This ticket was cancelled. Ask the attendant if this is a mistake.</p>}
+      </section>
+
+      <section className="cp-card">
+        <h2 className="cp-h">Parking charges <small>{cat?.name}</small></h2>
+        <div className="cp-rates">
+          <div className={extra === 0 && t.status === 'inside' ? 'now' : ''}><span>First {r.firstHours} {r.firstHours === 1 ? 'hour' : 'hours'}</span><b className="num">{rupees(r.firstPaise)}</b></div>
+          <div className={extra > 0 && t.status === 'inside' ? 'now' : ''}><span>Every extra hour (or part)</span><b className="num">{rupees(r.perHourPaise)}</b></div>
+          <div><span>Leave within {tv.graceMin} min</span><b>Free</b></div>
+          {r.capPaise > 0 && <div><span>Most you pay per 24 hours</span><b className="num">{rupees(r.capPaise)}</b></div>}
+        </div>
+        {t.prepaidHours > 0 && <p className="cp-note">You prepaid {t.prepaidHours}h. No refund for leaving early; extra time is charged at exit.</p>}
+        <p className="cp-fine">Example: in at 10:00, out at 11:20 → {rupees(charge(80, r, tv.graceMin).total)}. Rates are fixed from the time you came in.</p>
+      </section>
+
+      <footer className="cp-foot">
+        <b>{s.operator}</b>
+        <span>{s.siteName}{s.address ? ' · ' + s.address : ''}</span>
+        {s.phone && <a href={'tel:' + s.phone.replace(/[^\d+]/g, '')}>Call {s.phone}</a>}
+        {s.gstin && <span>GSTIN {s.gstin}</span>}
+      </footer>
     </div>
   )
 }

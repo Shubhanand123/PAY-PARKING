@@ -231,8 +231,8 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
   if (r === 'printer-test') return <PrinterTest />
   if (r.startsWith('t/')) return (
     <div className="screen">
-      <header className="hero slim"><div className="glow g1" /><div className="hero-row"><div className="brand"><span className="brand-mark"><Ico n="p" /></span>{db.settings.siteName}</div></div><h1>Your parking ticket</h1></header>
-      <main className="content"><Customer db={db} token={r.slice(2)} /></main>
+      <header className="cp-head"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /><div><b>Your parking ticket</b><small>{db.settings.siteName}</small></div></header>
+      <main className="content cp-main"><Customer db={db} token={r.slice(2)} /></main>
     </div>
   )
 

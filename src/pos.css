@@ -512,3 +512,49 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 /* Printed slip: big ticket QR on its own line, so the exit gate scanner reads it at once (about 32 mm wide on 58 mm paper). */
 .slip-print .slip-qr-row { flex-direction: column !important; align-items: center !important; text-align: center !important; gap: 8px !important; }
 .slip-print .slip-qr-row .qr-svg, .slip-print .slip-qr-row svg, .slip-print .slip-qr-row img { width: 260px !important; height: 260px !important; }
+
+/* ---------- Customer ticket page (phone, after scanning the slip QR) ---------- */
+.cp-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; background: #16245c; color: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / 18%); }
+.cp-head .parker-logo { height: 30px; width: auto; }
+.cp-head div { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.cp-head b { font-size: 16px; }
+.cp-head small { font-size: 12px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-main { padding: 14px 14px 28px; max-width: 520px; margin: 0 auto; }
+.cp { display: flex; flex-direction: column; gap: 12px; }
+.cp-card { background: var(--color-bg-surface, #fff); border: 1px solid var(--color-border, #e4e7ee); border-radius: 18px; padding: 16px; box-shadow: 0 1px 2px rgb(16 24 40 / 5%); animation: rise-in 260ms var(--ease, ease) both; }
+.cp-card:nth-child(2) { animation-delay: 60ms; } .cp-card:nth-child(3) { animation-delay: 120ms; }
+.cp-center { text-align: center; }
+.cp-veh-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.cp-veh-ico { flex: none; width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: #eef2fb; color: #16245c; }
+.cp-veh-txt { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.cp-veh-txt small { font-size: 12px; color: var(--color-text-muted, #667085); font-weight: 600; }
+.cp-plate { font-size: 20px; align-self: flex-start; }
+.cp-status { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 800; padding: 6px 11px; border-radius: 999px; }
+.cp-status.live { background: #e7f0ff; color: #1747c8; }
+.cp-status.live i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: live-pulse 1.8s ease-out infinite; }
+.cp-status.ok, .cp-status.done { background: #e6f6ec; color: #15803d; }
+.cp-status.bad { background: #fdecec; color: #b42318; }
+.cp-meta { display: flex; justify-content: space-between; margin-top: 12px; font-size: 12.5px; color: var(--color-text-muted, #667085); }
+.cp-meta b { color: var(--color-text, #16181d); }
+.cp-pay { text-align: center; padding: 20px 16px; }
+.cp-pay > small { font-size: 13px; font-weight: 700; color: var(--color-text-muted, #667085); text-transform: uppercase; letter-spacing: .06em; }
+.cp-amount { font-size: 46px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 4px 0 6px; color: #16245c; }
+.cp-pay.ok .cp-amount, .cp-pay.done .cp-amount { color: #15803d; }
+.cp-tick { display: inline-grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: #16a34a; color: #fff; margin-bottom: 6px; animation: pop-in 360ms var(--ease, ease) both; }
+.cp-lines { margin: 10px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--color-bg-subtle, #f6f7fa); text-align: left; font-size: 14px; }
+.cp-lines div { display: flex; justify-content: space-between; padding: 3px 0; }
+.cp-note { margin: 10px 0 0; font-size: 14px; color: var(--color-text-muted, #667085); line-height: 1.45; }
+.cp-note.ok { color: #15803d; font-weight: 700; }
+.cp-h { display: flex; align-items: baseline; justify-content: space-between; font-size: 16px; margin: 0 0 10px; }
+.cp-h small { font-size: 12.5px; font-weight: 600; color: var(--color-text-muted, #667085); }
+.cp-rates { display: flex; flex-direction: column; border: 1px solid var(--color-border, #e4e7ee); border-radius: 12px; overflow: hidden; }
+.cp-rates div { display: flex; justify-content: space-between; align-items: center; padding: 11px 12px; font-size: 14.5px; }
+.cp-rates div + div { border-top: 1px solid var(--color-border, #e4e7ee); }
+.cp-rates b { font-size: 15.5px; }
+.cp-rates .now { background: #eef4ff; box-shadow: inset 3px 0 0 #1747c8; }
+.cp-rates .now span::after { content: 'now'; margin-left: 8px; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #1747c8; }
+.cp-fine { margin: 10px 0 0; font-size: 12.5px; color: var(--color-text-muted, #667085); line-height: 1.45; }
+.cp-foot { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 12px 0; text-align: center; font-size: 12.5px; color: var(--color-text-muted, #667085); }
+.cp-foot b { color: var(--color-text, #16181d); font-size: 14px; }
+.cp-foot a { color: #1747c8; font-weight: 700; text-decoration: none; padding: 6px 0; }
+@keyframes pop-in { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
