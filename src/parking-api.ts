@@ -6,6 +6,16 @@ export const apiEnabled = Boolean(import.meta.env.VITE_PARKING_API)
 /** Temporary: no sign-in. The server must also have PARKING_OPEN_ACCESS=true. */
 export const openAccess = import.meta.env.VITE_OPEN_ACCESS === 'true'
 const keyName = 'parking-device-key'
+// Moved to a new server (e.g. Sydney -> Mumbai): records, unsent offline work and the POS setup key saved for
+// the old server mean nothing there. Clear them once, so the POS starts clean (and asks to be set up again).
+try {
+  const server = String(import.meta.env.VITE_PARKING_API ?? '')
+  const saved = localStorage.getItem('parkar-server')
+  if (server && saved !== server) {
+    if (saved !== null || localStorage.getItem('parkar-snapshot')) for (const k of ['parkar-snapshot', 'parkar-outbox', 'parkar-offline-count', keyName]) localStorage.removeItem(k)
+    localStorage.setItem('parkar-server', server)
+  }
+} catch { /* storage blocked */ }
 export const deviceKey = () => localStorage.getItem(keyName) ?? ''
 export function setDeviceKey(key: string) {
   if (key) localStorage.setItem(keyName, key)

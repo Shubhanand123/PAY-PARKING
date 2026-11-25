@@ -3,7 +3,7 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 select cron.schedule('parking-keep-awake', '*/4 * * * *', $$
   select net.http_post(
-    url := 'https://grzmwiegmlefjkjkzbuk.supabase.co/functions/v1/parking',
+    url := 'https://uovkdgrloqenejnskeer.supabase.co/functions/v1/parking',
     body := '{"action":"ping","args":[]}'::jsonb,
     headers := '{"Content-Type":"application/json"}'::jsonb
   )

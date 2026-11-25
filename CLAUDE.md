@@ -2,7 +2,7 @@
 
 Gate POS (Entry / Exit) and Owner dashboard for a pay-and-park site in Goa. Owner: Saroj Kumar Chowdhary (Sai Express).
 React 19 + Vite + TypeScript. Live at https://pay-parking-ekb.pages.dev (Cloudflare Pages, production branch `codex/pay-parking-live`).
-Backend: Supabase project `grzmwiegmlefjkjkzbuk`, Edge Function `parking` (supabase/functions/parking/index.ts). Payments: Razorpay (test keys now).
+Backend: Supabase project `uovkdgrloqenejnskeer` (Mumbai, ap-south-1; moved 25 Nov 2026 from grzmwiegmlefjkjkzbuk, Sydney), Edge Function `parking` (supabase/functions/parking/index.ts). Payments: Razorpay (test keys now).
 
 ## How things are wired
 - `src/engine.ts` holds every parking rule (bill, tickets, payments, audit). The Edge Function imports it, so client and server use the same code.
