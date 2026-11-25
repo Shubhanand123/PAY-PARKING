@@ -16,8 +16,10 @@ function fontCss(node: HTMLElement) {
   fonts ??= drawer().then(m => m.getFontEmbedCSS(node)).catch(() => { fonts = undefined; return '' })
   return fonts
 }
+let builtIn: boolean | undefined
 /** Call when the app opens: prepares printing in the background. */
 export function warmPrinter() {
+  PlateReader.printerInfo().then(info => { builtIn ??= info.builtIn }).catch(() => { builtIn = false })
   const run = () => {
     const probe = document.createElement('div')
     probe.className = 'slip slip-print'
@@ -32,7 +34,7 @@ export function warmPrinter() {
 /** Draws the on-screen slip as a black-on-white picture exactly 384 dots wide. */
 export async function slipImage(): Promise<string | undefined> {
   let slip = document.querySelector<HTMLElement>('.slip')
-  for (let i = 0; !slip && i < 10; i++) { await new Promise(r => setTimeout(r, 30)); slip = document.querySelector<HTMLElement>('.slip') }
+  for (let i = 0; !slip && i < 60; i++) { await new Promise(r => setTimeout(r, 30)); slip = document.querySelector<HTMLElement>('.slip') }
   if (!slip) return undefined
   const { toCanvas } = await drawer()
   // Print a copy laid out at the paper's width, so it looks the same on every screen size.
@@ -60,7 +62,6 @@ export async function slipImage(): Promise<string | undefined> {
   } finally { holder.remove() }
 }
 
-let builtIn: boolean | undefined
 export async function printSlip() {
   await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))) // let the slip render first
   if (nativeApp) {
@@ -68,6 +69,7 @@ export async function printSlip() {
       try {
         const image = await slipImage()
         if (image) { await PlateReader.printImage({ image }); builtIn = true; return }
+        if (builtIn) return // nothing to print on screen: never open the print preview on a POS with its own printer
       } catch (error) {
         const message = String((error as Error)?.message ?? error)
         // No built-in printer, or an older app without direct printing: use the print screen from now on.

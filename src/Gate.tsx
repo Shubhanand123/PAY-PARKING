@@ -304,7 +304,8 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
   }
   // As soon as the bill is paid (cash, free, or online) the receipt prints by itself, once per ticket.
   const autoPrinted = useRef('')
-  const paidNow = t && t.status === 'paid' && !t.receiptPrints ? t : undefined
+  // Waits until the receipt itself is on screen (not the QR screen), because the printer prints what is shown.
+  const paidNow = t && t.status === 'paid' && !t.receiptPrints && !paying ? t : undefined
   useEffect(() => {
     if (!paidNow || autoPrinted.current === paidNow.id) return
     autoPrinted.current = paidNow.id

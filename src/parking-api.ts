@@ -95,6 +95,16 @@ export function callParking<T>(action: string, args: unknown[] = [], setupKey?: 
   return requestParking<ParkingResponse & { result: T; db?: DB }>({ action, args }, action === 'customer' ? '' : setupKey)
 }
 
+// One QR request per ticket at a time: the bill screen starts making the QR early, and the pay screen
+// joins that same request instead of asking Razorpay for a second QR.
+const qrInFlight = new Map<string, Promise<unknown>>()
 export function callParkingPayment<T extends object>(endpoint: PaymentEndpoint, payload: Record<string, unknown>) {
-  return requestParking<T & ParkingResponse>(payload, payload.ticket_token ? '' : undefined, endpoint)
+  const send = () => requestParking<T & ParkingResponse>(payload, payload.ticket_token ? '' : undefined, endpoint)
+  if (endpoint !== 'create-order') return send()
+  const key = [payload.ticket_id, payload.ticket_token, payload.amount, payload.upi_qr].join('|')
+  const running = qrInFlight.get(key) as Promise<T & ParkingResponse> | undefined
+  if (running) return running
+  const request = send().finally(() => qrInFlight.delete(key))
+  qrInFlight.set(key, request)
+  return request
 }
