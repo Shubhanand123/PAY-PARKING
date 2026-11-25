@@ -272,6 +272,10 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
 
 /** H2 header for the gates: colour-coded Entry (blue) / Exit (orange) switch, clock and connection light.
  *  While a slip, a payment QR or a receipt is on screen the switch is replaced by a gate badge. */
+// Tap the logo 5 times quickly to open the printer test page (for setting up the POS printer).
+let taps: number[] = []
+function logoTap() { const now = Date.now(); taps = [...taps.filter(t => now - t < 2500), now]; if (taps.length >= 5) { taps = []; location.hash = '/printer-test' } }
+
 function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[]; flow: string; offline: boolean }) {
   const now = useNow(15000)
   const [online, setOnline] = useState(navigator.onLine)
@@ -287,7 +291,7 @@ function GateHeader({ view, routes, flow, offline }: { view: View; routes: View[
   return (
     <header className={'gh gh-' + view}>
       <div className="gh-row">
-        <span className="gh-brand"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span>
+        <span className="gh-brand" onClick={logoTap}><img className="parker-logo" src="parker-logo.png" alt="PARKER" /></span>
         <span id="upd-slot" />
         <span className="gh-time num">{fmtTime(now)}</span>
         <span className={'gh-net' + (net ? ' off' : waiting ? ' wait' : '')}><i />{net ? 'Offline' : waiting ? 'Sending' : 'Online'}{waiting > 0 && <b className="num"> · {waiting}</b>}</span>
