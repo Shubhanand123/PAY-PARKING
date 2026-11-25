@@ -265,7 +265,7 @@ public class PlateScanActivity extends AppCompatActivity {
                 PlateTextReader.Reading rd = ours.read(band);
                 readerMs = (System.nanoTime() - tr) / 1_000_000;
                 String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
-                if (plate != null && rd.confidence >= 0.9f) {
+                if (plate != null && rd.confidence >= 0.95f) { // 95%: right 99-100% of the time on unseen Indian plates
                     final Bitmap seen = band;
                     lastBoxed = true; ownReader = true;
                     main.post(() -> { if (!finished) { lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });

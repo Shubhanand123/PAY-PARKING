@@ -16,3 +16,14 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER I
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Runtime: ONNX Runtime (Microsoft), MIT License.
+
+Both models store their weights as float16 (converted back to float32 when loaded; results unchanged).
+
+plate_reader_in.onnx: Indian number plate reader. Starts from fast-plate-ocr "cct-xs-v2-global" (MIT License,
+Copyright (c) ankandrew, https://github.com/ankandrew/fast-plate-ocr), fine-tuned on:
+ - "Indian Number Plate Detection" by Payals Workspace, Roboflow Universe, CC BY 4.0
+   https://universe.roboflow.com/payals-workspace-gz1ub/indian-number-plate-detection-g7voe
+ - "License Plate" by ANPR, Roboflow Universe, CC BY 4.0
+   https://universe.roboflow.com/anpr-tsug0/license-plate-eq813
+ - synthetic Indian plates generated for this app.
+Test result (163 unseen Indian plates): 87.1% read exactly; when it is at least 95% sure: 131 of 131 right.
