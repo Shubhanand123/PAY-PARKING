@@ -51,7 +51,7 @@ function loadCheckout() {
   return loading
 }
 
-export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, linkUrl, upiQr, qrImage, test = false, pos = false, onRevision }: {
+export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, linkUrl, upiQr, qrImage, test = false, pos = false, onRevision, payLabel }: {
   ticketId: string
   token: string
   amount: number
@@ -63,6 +63,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
   test?: boolean
   pos?: boolean
   onRevision?: (revision: number) => void
+  payLabel?: string // customer page: the words on the pay button
 }) {
   const busyRef = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -230,7 +231,7 @@ export function RazorpayCheckout({ ticketId, token, amount, name, hasOrder, link
       : linkUrl
         ? <a className="btn btn-primary btn-xl" href={linkUrl} target="_blank" rel="noopener noreferrer">Open Razorpay payment · {rupees(amount)}</a>
         : <button className="btn btn-primary btn-xl" disabled={busy || amount < 100} onClick={() => void open()}>
-          {busy ? 'Working…' : <>{hasOrder ? 'Resume Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
+          {busy ? 'Opening Razorpay…' : payLabel ? <>{payLabel} · {rupees(amount)}</> : <>{hasOrder ? 'Resume Razorpay' : 'Pay online · Razorpay'} · {rupees(amount)}</>}
         </button>}
     {hasOrder && <button className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check payment status</button>}
     {pos && hasOrder && (confirmCash

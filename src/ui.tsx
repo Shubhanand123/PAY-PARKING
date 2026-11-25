@@ -44,6 +44,7 @@ const P: Record<string, string> = {
   back: '<path d="M15 6l-6 6 6 6"/>',
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>',
   clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   p: '<rect x="3" y="3" width="18" height="18" rx="5"/><path d="M9.5 17V7h3.5a3 3 0 0 1 0 6H9.5"/>',
   dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
 }

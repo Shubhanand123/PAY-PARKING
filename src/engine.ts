@@ -66,7 +66,7 @@ export type Receipt = {
   operator: string; siteName: string; address: string; phone: string; gstin?: string
   ticketId: string; plate: string; vehicle: string; entryAt: number; entryGate: string
   billedAt: number; minutes: number; lines: Line[]; totalPaise: number
-  payments: { method: Payment['method']; kind: Payment['kind']; amountPaise: number; receiptNo: string }[]
+  payments: { method: Payment['method']; kind: Payment['kind']; amountPaise: number; receiptNo: string; phone?: boolean; at?: number }[]
   free?: FreeExit
 }
 export type AuditKind = 'entry' | 'print' | 'reprint' | 'receipt_print' | 'receipt_reprint' | 'free_vehicle' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login'
@@ -327,7 +327,7 @@ export function makeReceipt(db: DB, t: Ticket, by: string): Receipt {
     operator: db.settings.operator, siteName: db.settings.siteName, address: db.settings.address, phone: db.settings.phone, ...(db.settings.gstin ? { gstin: db.settings.gstin } : {}),
     ticketId: t.id, plate: t.plate, vehicle: db.categories.find(c => c.id === t.category)?.name ?? t.category, entryAt: t.entryAt, entryGate: t.entryGate,
     billedAt: t.billedAt ?? Date.now(), minutes: b.minutes, lines: b.lines, totalPaise: t.totalPaise ?? b.totalPaise,
-    payments: pays.map(p => ({ method: p.method, kind: p.kind, amountPaise: p.amountPaise, receiptNo: p.receiptNo })),
+    payments: pays.map(p => ({ method: p.method, kind: p.kind, amountPaise: p.amountPaise, receiptNo: p.receiptNo, ...(p.by === 'Customer (phone)' ? { phone: true, at: p.at } : {}) })),
     free: t.free,
   }
 }

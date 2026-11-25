@@ -24,7 +24,8 @@ import { alreadyInside, ticketCancelled } from './fx'
 function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
   const tv = db.tariffs.find(x => x.id === t.tariffId)
   const rt = tv?.rates[t.category]
-  const paidBy = (p: Receipt['payments'][number]) => p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid by UPI' : 'Paid in cash'
+  const paidBy = (p: Receipt['payments'][number]) => p.kind === 'prepaid' ? 'Paid at entry' : p.phone ? `Paid online${p.at ? ' · ' + fmtTime(p.at) : ''}` : p.method === 'razorpay' ? 'Paid by UPI' : 'Paid in cash'
+  const paidTotal = r.payments.reduce((sum, p) => sum + p.amountPaise, 0)
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
@@ -46,7 +47,9 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
       <hr />
       {r.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
       <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(r.totalPaise)}</b></div>
+      {r.payments.length > 0 && <div className="slip-paid-h">PAYMENTS</div>}
       {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{paidBy(p)}</span><b>{rupees(p.amountPaise)}</b></div>)}
+      {!r.free && paidTotal >= r.totalPaise && <div className="slip-stamp">PAID IN FULL · {rupees(paidTotal)}</div>}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
       <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
       <div className="slip-foot"><b>Thank you for parking with us!</b><br />Drive safe · Issued by {r.issuedBy}</div>
@@ -414,7 +417,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
             <span className="ind-plate"><i />{prettyPlate(t.plate)}</span>
             {<button className="icon-btn more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>}
           </div>
-          <div className="tk2-sub"><span className="veh-chip"><Ico n={cat?.icon ?? 'car'} size={20} />{cat?.name}</span><span className="muted small">{t.id}</span><StatusPill t={t} />{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
+          <div className="tk2-sub"><span className="veh-chip"><Ico n={cat?.icon ?? 'car'} size={20} />{cat?.name}</span><span className="muted small">{t.id}</span>{phonePaid > 0 && !b.duePaise ? <Pill tone="ok">Paid online</Pill> : <StatusPill t={t} />}{confirmLost && <Pill tone="warn">Found by plate</Pill>}</div>
           {menu && <div className="tk2-menu"><button className="link danger" onClick={() => { setMenu(false); setCancelling(true) }}><Ico n="x" size={16} /> Cancel this ticket</button></div>}
           <SlabBar from={t.entryAt} to={now} firstHours={rate.firstHours} firstPaise={rate.firstPaise} perHourPaise={rate.perHourPaise} />
         </div>
@@ -538,6 +541,7 @@ export function Customer({ db, token }: { db: DB; token: string }) {
   const s = db.settings
   const paid = t.status === 'inside' ? paidOnPhone(db, t) : 0
   const until = paid > 0 ? paidUntil(db, t, paid) : undefined
+  const lastPay = db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').sort((x, y) => y.at - x.at)[0]
   const status = t.status === 'inside' ? (paid > 0 && b.duePaise === 0 ? { tone: 'ok', text: 'Paid' } : { tone: 'live', text: 'Parked' }) : t.status === 'paid' ? { tone: 'ok', text: 'Paid' } : t.status === 'exited' ? { tone: 'done', text: 'Left' } : { tone: 'bad', text: 'Cancelled' }
   return (
     <div className="cp">
@@ -553,23 +557,34 @@ export function Customer({ db, token }: { db: DB; token: string }) {
 
       <section className={'cp-card cp-pay ' + status.tone}>
         {t.status === 'inside' && paid > 0 && b.duePaise === 0 && <>
-          <span className="cp-tick"><Ico n="check" size={26} /></span>
+          <span className="cp-tick big"><Ico n="check" size={34} /></span>
           <small>Bill cleared</small>
           <div className="cp-amount num">{rupees(paid)}</div>
-          <p className="cp-note ok">Paid online. Please collect your receipt at the exit gate.</p>
-          {until && <p className="cp-note">Covers your stay until <b>{fmtTime(until)}</b>. After that, {rupees(r.perHourPaise)} per extra hour is collected at the exit.</p>}
+          <p className="cp-note ok">Paid online{lastPay ? ' at ' + fmtTime(lastPay.at) : ''}. Thank you!</p>
+          {until && <div className="cp-cover">
+            <div className="cp-cover-top"><span>Covered until <b>{fmtTime(until)}</b></span><b className="num">{dur(Math.max(0, until - now))} left</b></div>
+            <div className="cp-cover-bar"><i style={{ width: Math.min(100, Math.max(3, (now - t.entryAt) / (until - t.entryAt) * 100)) + '%' }} /></div>
+            <small>After that, {rupees(r.perHourPaise)} per extra hour is collected at the exit.</small>
+          </div>}
+          <div className="cp-collect"><Ico n="print" size={22} /><span><b>Collect your receipt at the exit gate.</b> Show your slip or this screen.</span></div>
         </>}
         {t.status === 'inside' && (paid === 0 || b.duePaise > 0) && <>
           <small>{paid > 0 ? 'Extra time to pay' : t.onlineCheckout && !t.onlineCheckout.byCustomer ? 'Amount to pay' : 'To pay if you leave now'}</small>
           <div className="cp-amount num">{rupees(b.duePaise)}</div>
-          {paid > 0 && <p className="cp-note">You already paid {rupees(paid)}. You stayed longer, so {rupees(b.duePaise)} more is due.</p>}
           {inGrace && paid === 0 && <p className="cp-note ok">Free if you leave within {tv.graceMin} min of entry.</p>}
-          {b.lines.length > 0 && paid === 0 && <div className="cp-lines">{b.lines.map((l, i) => <div key={i}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}</div>}
+          {paid > 0
+            ? <div className="cp-lines">
+              <div><span>Parking for {dur(end - t.entryAt)}</span><b className="num">{rupees(b.totalPaise)}</b></div>
+              <div className="minus"><span>Paid online{lastPay ? ' · ' + fmtTime(lastPay.at) : ''}</span><b className="num">− {rupees(paid)}</b></div>
+              <div className="due"><span>Due now</span><b className="num">{rupees(b.duePaise)}</b></div>
+            </div>
+            : b.lines.length > 0 && <div className="cp-lines">{b.lines.map((l, i) => <div key={i}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}</div>}
           {db.razorpayEnabled && b.duePaise >= 100
             ? <div className="cp-paybox">
-              <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={s.operator} hasOrder={Boolean(t.onlineCheckout)}
+              <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={s.operator} hasOrder={Boolean(t.onlineCheckout)} payLabel={paid > 0 ? 'Pay extra now' : 'Pay now'}
                 linkUrl={t.onlineCheckout?.linkUrl} upiQr={t.onlineCheckout?.byCustomer ? undefined : t.onlineCheckout?.upiQr} qrImage={t.onlineCheckout?.byCustomer ? undefined : t.onlineCheckout?.qrImage} />
-              <p className="cp-fine">Pay now with any UPI app, card or net banking (secured by Razorpay) and skip the queue. Collect your receipt at the exit.</p>
+              <div className="cp-methods"><span>GPay</span><span>PhonePe</span><span>Paytm</span><span>Any UPI</span><span>Cards</span></div>
+              <p className="cp-fine"><Ico n="lock" size={13} /> Secured by Razorpay. Pay now and skip the queue; collect your receipt at the exit.</p>
             </div>
             : <p className="cp-note">Pay at the exit gate by <b>UPI</b> or <b>cash</b>. Show your slip there.</p>}
         </>}

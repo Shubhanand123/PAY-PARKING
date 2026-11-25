@@ -563,3 +563,25 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 .cp-tick { display: grid; margin: 0 auto 8px; }
 .cp-veh-txt { min-width: 0; }
 .cp-plate { max-width: 100%; }
+
+/* Customer page: paid, extra time, pay box */
+.cp-tick.big { width: 64px; height: 64px; position: relative; box-shadow: 0 8px 24px rgb(22 163 74 / 35%); }
+.cp-tick.big::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgb(22 163 74 / 35%); animation: q9-ring 1.6s ease-out infinite; }
+.cp-cover { margin: 14px 0 4px; padding: 12px; border-radius: 14px; background: #f0faf3; text-align: left; }
+.cp-cover-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; color: #14532d; }
+.cp-cover-bar { height: 8px; border-radius: 999px; background: #d7f0df; margin: 8px 0; overflow: hidden; }
+.cp-cover-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22c55e, #15803d); transition: width .6s var(--ease, ease); }
+.cp-cover small { font-size: 12.5px; color: #3f6b4f; }
+.cp-collect { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 12px; border-radius: 14px; background: #16245c; color: #fff; text-align: left; font-size: 14px; line-height: 1.4; }
+.cp-collect svg { flex: none; }
+.cp-lines .minus b { color: #15803d; }
+.cp-lines .due { border-top: 1px dashed #c9cfdb; margin-top: 4px; padding-top: 7px !important; font-weight: 800; font-size: 15px; }
+.cp-paybox .btn { min-height: 56px; font-size: 17px; font-weight: 800; border-radius: 14px; background: linear-gradient(135deg, #1747c8, #16245c); border: 0; box-shadow: 0 8px 20px rgb(23 71 200 / 30%); }
+.cp-methods { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.cp-methods span { font-size: 11.5px; font-weight: 700; padding: 4px 9px; border-radius: 999px; background: #f1f4fa; color: #475069; }
+.cp-fine svg { vertical-align: -2px; }
+/* Printed receipt: payments heading and paid stamp */
+.slip-paid-h { margin-top: 8px; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-align: left; color: #555; }
+.slip-stamp { margin: 10px auto 2px; width: fit-content; padding: 4px 12px; border: 2px solid currentColor; border-radius: 6px; font-weight: 800; letter-spacing: .08em; font-size: 12px; transform: rotate(-2deg); }
+.slip-print .slip-paid-h { font-size: 14px !important; color: #000 !important; margin-top: 12px; }
+.slip-print .slip-stamp { font-size: 18px !important; border-width: 3px !important; padding: 6px 14px !important; color: #000; }
