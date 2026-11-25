@@ -252,7 +252,13 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   // Fast "paid yet?" check from the gate: ask Razorpay about the open QR first; read the records only once money is there.
   if (action === 'check-payment' && actor && typeof payload.qr_id === 'string' && razorpayQrId.test(payload.qr_id) && Number.isSafeInteger(payload.amount) && (payload.amount as number) > 0) {
     const found = await capturedQrPayment(razorpay, payload.qr_id, payload.amount as number).catch(() => undefined)
-    if (!found) return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
+    if (!found) {
+      // Razorpay's payment list lags behind its webhook: the webhook may already have marked the ticket paid.
+      const current = await state()
+      const done = select(current.db)
+      if (done && (done.status === 'paid' || done.status === 'exited')) return reply({ success: true, status: done.status, revision: done.rev, snapshot: publishState(current, actor.role) })
+      return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
+    }
   }
   // Making the UPI QR at Razorpay takes about a second: start it now, while the records are read, instead of after.
   // If the ticket turns out to already have a QR, or the amount is wrong, this early QR is closed again.
@@ -476,6 +482,28 @@ async function razorpayWebhook(request: Request, raw: string, body: Record<strin
   if (!secret || !/^[a-f0-9]{64}$/.test(signature) || await hmacHex(secret, raw) !== signature) return reply({ error: 'Signature did not match.' }, 400)
   const payload = (body?.payload ?? {}) as Record<string, { entity?: Record<string, unknown> }>
   const qrId = (payload.qr_code?.entity?.id ?? (payload.payment?.entity?.notes as Record<string, unknown> | undefined)?.qr_code_id) as string | undefined
+  // The webhook is signed by Razorpay with our secret, so its payment details are proof on their own.
+  // Settle straight from them: Razorpay's payment list (used by "check payment") shows the payment 10+ s later.
+  const pay = payload.payment?.entity
+  const orderRef = typeof qrId === 'string' && razorpayQrId.test(qrId) ? qrId : typeof pay?.order_id === 'string' && razorpayOrderId.test(pay.order_id) ? pay.order_id : undefined
+  const payId = typeof pay?.id === 'string' ? pay.id : '', payAmount = Number(pay?.amount)
+  if (orderRef && pay && pay.status === 'captured' && razorpayPaymentId.test(payId)
+    && pay.currency === 'INR' && Number.isSafeInteger(payAmount) && !Number(pay.amount_refunded ?? 0)) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { db, version } = await state()
+      const ticket = db.tickets.find(t => t.onlineCheckout?.orderId === orderRef)
+      if (!ticket || ticket.onlineCheckout!.amount !== payAmount) break // not ours, or amount differs: use the careful path below
+      if (db.payments.some(p => p.providerPaymentId === payId)) return reply({ ok: true, status: 'already settled' })
+      if (ticket.status !== 'inside' && !(ticket.upiCheck && ticket.upiCheck.orderId === orderRef)) break
+      const staff = db.staff.find(person => person.id === 'sunil')!
+      try { parking.settleOnlinePayment(db, { ...staff, name: 'Razorpay' }, ticket, orderRef, payId) } catch (error) { console.error('Webhook settle refused: ' + error); break }
+      if (await saveState(db, version)) {
+        const lag = typeof pay.created_at === 'number' ? Math.round(Date.now() / 1000 - pay.created_at) : '?'
+        console.log(`Payment timing: ${payId} settled from webhook ${String(body?.event)} · ${lag} s after the customer paid`)
+        return reply({ ok: true, status: 'settled' })
+      }
+    }
+  }
   if (typeof qrId !== 'string' || !razorpayQrId.test(qrId)) return reply({ ok: true, ignored: true })
   const { db } = await state()
   if (db.tickets.some(t => t.upiCheck?.orderId === qrId)) { await reconcileUpi(qrId); return reply({ ok: true, status: 'reconciled' }) }

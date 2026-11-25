@@ -12,6 +12,7 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
     SUPABASE_SERVICE_ROLE_KEY: 'local-service',
     RAZORPAY_KEY_ID: keyId,
     RAZORPAY_KEY_SECRET: keySecret,
+    RAZORPAY_WEBHOOK_SECRET: 'hook-secret',
   }
   const gateKey = 'a'.repeat(64)
   let deviceRole = 'exit'
@@ -23,6 +24,8 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
   cashTicket.entryAt = ticket.entryAt
   const linkTicket = runAction(db, 'ravi', createEntry, 'GA01VA1236', 'car', 0).ticket
   linkTicket.entryAt = ticket.entryAt
+  const hookTicket = runAction(db, 'ravi', createEntry, 'GA01VA1237', 'car', 0).ticket
+  hookTicket.entryAt = ticket.entryAt
   const amount = billFor(db, ticket, Date.now()).duePaise
   let snapshot = { db, version: 1 } as { db: DB; version: number }
   let providerCreateCount = 0
@@ -162,6 +165,29 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
     assert.equal((await invoke('/check-payment', { ticket_id: linkTicket.id })).status, 200)
     assert.equal(snapshot.db.tickets[2].status, 'paid')
     assert.equal(snapshot.db.payments.at(-1)?.method, 'razorpay')
+
+    // Razorpay webhook: a signed "captured" message marks the ticket paid at once (no waiting for Razorpay's lists).
+    provider.order_id = 'order_Hook'
+    const hookOrder = await (await invoke('/create-order', { ticket_id: hookTicket.id, amount, currency: 'INR', receipt: hookTicket.id })).json()
+    assert.equal(hookOrder.order_id, 'order_Hook')
+    const hook = (body: object, secret = 'hook-secret') => {
+      const raw = JSON.stringify(body)
+      return handler(new Request('https://parking.test/functions/v1/parking/razorpay-webhook', {
+        method: 'POST', body: raw,
+        headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': createHmac('sha256', secret).update(raw).digest('hex') },
+      }))
+    }
+    const captured = { event: 'payment.captured', payload: { payment: { entity: { id: 'pay_Hook', order_id: 'order_Hook', status: 'captured', amount, currency: 'INR', amount_refunded: 0, created_at: Math.floor(Date.now() / 1000) } } } }
+    assert.equal((await hook(captured, 'wrong-secret')).status, 400)
+    assert.equal(snapshot.db.tickets[3].status, 'inside')
+    const wrongAmount = structuredClone(captured); wrongAmount.payload.payment.entity.amount = amount + 100
+    await hook(wrongAmount)
+    assert.equal(snapshot.db.tickets[3].status, 'inside')
+    assert.equal((await (await hook(captured)).json()).status, 'settled')
+    assert.equal(snapshot.db.tickets[3].status, 'paid')
+    assert.equal(snapshot.db.payments.filter(p => p.providerPaymentId === 'pay_Hook').length, 1)
+    assert.equal((await (await hook(captured)).json()).status, 'already settled') // Razorpay retries: counted once
+    assert.equal(snapshot.db.payments.filter(p => p.providerPaymentId === 'pay_Hook').length, 1)
   } finally {
     globalThis.fetch = originalFetch
     runtime.Deno = before
