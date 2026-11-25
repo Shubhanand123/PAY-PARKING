@@ -102,8 +102,8 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
           {t.prepaidHours > 0 && <><br />Prepaid time is not refunded; extra time is charged at exit.</>}
         </div>
       </>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to check your time and amount to pay.</span></div>
-      {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Show it at the exit gate.<br />Thank you · Drive safe</div>}
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to check your time and amount to pay.' : <><b>SCAN TO PAY ONLINE</b><br />See your time and amount, and pay by UPI or card before you leave. Skip the queue at the exit.</>}</span></div>
+      {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Paid online? Collect your receipt at the exit gate.<br />Thank you · Drive safe</div>}
     </div>
   )
 }

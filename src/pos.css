@@ -585,3 +585,5 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 .slip-stamp { margin: 10px auto 2px; width: fit-content; padding: 4px 12px; border: 2px solid currentColor; border-radius: 6px; font-weight: 800; letter-spacing: .08em; font-size: 12px; transform: rotate(-2deg); }
 .slip-print .slip-paid-h { font-size: 14px !important; color: #000 !important; margin-top: 12px; }
 .slip-print .slip-stamp { font-size: 18px !important; border-width: 3px !important; padding: 6px 14px !important; color: #000; }
+.slip-qr-row b { letter-spacing: .06em; }
+.slip-print .slip-qr-row b { font-size: 19px; font-weight: 800; }
