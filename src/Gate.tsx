@@ -11,7 +11,7 @@ import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
-  isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, type DB, type Receipt, type Staff, type Ticket,
+  isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, paidOnPhone, paidUntil, type DB, type Receipt, type Staff, type Ticket,
 } from './engine'
 import { printSlip } from './print'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
@@ -373,13 +373,14 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
       <div className={'stack paper-screen' + (t.status === 'paid' ? ' lit' : '')}>
         {t.status === 'paid' && <><span className="paid-glow" aria-hidden="true" /><span className="paid-flash" aria-hidden="true" /></>}
         {t.status === 'exited' && <div className="banner banner-ok"><Ico n="check" /><div><b>Closed.</b> Left at {fmtTime(t.exitAt!)} by {t.exitGate}.</div></div>}
+        {t.status === 'paid' && <div className="banner banner-ok"><Ico n="check" /><div><b>Bill already cleared · {rupees(t.totalPaise ?? 0)}.</b> Give the receipt and let the vehicle go.</div></div>}
         <div className="paper-full"><Slip db={db} t={t} receipt /></div>
         {staleBanner}
         {cancelCard}
         <div className="actionbar duo">
           <button className="btn btn-ghost btn-xl" onClick={() => void printReceipt(t)}><Ico n="print" size={22} /> Reprint</button>
           {t.status === 'paid'
-            ? <button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('', async () => { const r = await recordExit(me.id, t.id); setRev(r.rev) })}><Ico n="out" size={22} /> Vehicle left</button>
+            ? <button className="btn btn-primary btn-xl" disabled={stale || busy} onClick={() => act('Vehicle left', async () => { await recordExit(me.id, t.id); reset() })}><Ico n="out" size={22} /> Vehicle left · next</button>
             : <button className="btn btn-primary btn-xl" onClick={e => saveThen(e.currentTarget, reset)}><Ico n="check" size={22} /> Next vehicle</button>}
         </div>
         {t.status === 'paid' && !t.onlineCheckout && !cancelling && <button className="link danger" onClick={() => setCancelling(true)}>Cancel this ticket</button>}
@@ -404,6 +405,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
                   : label === 'Paid at entry' ? 'Paid when the vehicle came in'
                     : label.startsWith('Minimum') ? 'The prepaid block is the minimum charge' : ''
     const upi = db.razorpayEnabled && b.duePaise >= 100 && navigator.onLine
+    const phonePaid = t.status === 'inside' ? paidOnPhone(db, t) : 0
     return (
       <div className="stack exit-bill">
         <div className="card tk2">
@@ -416,18 +418,22 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
           {menu && <div className="tk2-menu"><button className="link danger" onClick={() => { setMenu(false); setCancelling(true) }}><Ico n="x" size={16} /> Cancel this ticket</button></div>}
           <SlabBar from={t.entryAt} to={now} firstHours={rate.firstHours} firstPaise={rate.firstPaise} perHourPaise={rate.perHourPaise} />
         </div>
+        {phonePaid > 0 && <div className={'banner ' + (b.duePaise ? 'banner-warn' : 'banner-ok')}><Ico n={b.duePaise ? 'warn' : 'check'} /><div>
+          {b.duePaise ? <><b>Paid {rupees(phonePaid)} on phone.</b> Stayed longer: collect {rupees(b.duePaise)} for the extra time.</> : <><b>Bill already cleared on phone · {rupees(phonePaid)}.</b> Nothing to collect. Give the receipt.</>}
+        </div></div>}
         <div className="card bill2">
           {b.lines.map((l, i) => <div key={i} className={'bl' + (l.paise < 0 ? ' minus' : '')}>
             <div><span>{l.label}</span>{why(l.label) && <small>{why(l.label)}</small>}</div>
             <b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b>
           </div>)}
+          {phonePaid > 0 && <div className="bl minus"><div><span>Paid on phone</span><small>Razorpay, before reaching the gate</small></div><b className="num">− {rupees(phonePaid)}</b></div>}
           <div className="rule-chips">
             <span>{tv.graceMin} min free</span>{rate.capPaise > 0 && <span>Max {rupees(rate.capPaise)} / 24h</span>}<span>After {rate.firstHours}h: {rupees(rate.perHourPaise)} / hour</span>
             <span>{t.onlineCheckout ? 'UPI QR ready · amount fixed' : 'Checked again before payment'}</span>
           </div>
         </div>
         <div className={'due-navy' + (b.duePaise ? '' : ' zero')}>
-          <div><b>{b.duePaise ? 'To collect' : b.free ? `Free · ${b.free.reason}` : 'Nothing due'}</b><small>Gate: Exit · as of {fmtTime(now)}</small></div>
+          <div><b>{b.duePaise ? (phonePaid ? 'Extra to collect' : 'To collect') : b.free ? `Free · ${b.free.reason}` : phonePaid ? 'Already paid online' : 'Nothing due'}</b><small>Gate: Exit · as of {fmtTime(now)}</small></div>
           <b className="num">{rupees(b.duePaise)}</b>
         </div>
         {staleBanner}
@@ -449,7 +455,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
               <Ico n="cash" size={24} /><span><b>Cash</b><small>received {rupees(b.duePaise)}</small></span></button>
           </div>
           : <div className="actionbar"><button className="btn btn-xl btn-success" disabled={busy} onClick={() => act('Done', async () => { const r = await takeCash(me.id, t.id, rev, 0); setRev(r.rev) })}>
-            <Ico n="check" size={24} /> {b.free ? `Free vehicle (${b.free.reason}) · Continue` : 'Nothing due · Continue'}</button></div>)}
+            <Ico n="check" size={24} /> {b.free ? `Free vehicle (${b.free.reason}) · Continue` : phonePaid ? 'Paid online · Give receipt' : 'Nothing due · Continue'}</button></div>)}
       </div>
     )
   }
@@ -530,7 +536,9 @@ export function Customer({ db, token }: { db: DB; token: string }) {
   const extra = Math.max(0, Math.ceil(minutes / 60) - r.firstHours)
   const inGrace = minutes <= tv.graceMin
   const s = db.settings
-  const status = t.status === 'inside' ? { tone: 'live', text: 'Parked' } : t.status === 'paid' ? { tone: 'ok', text: 'Paid' } : t.status === 'exited' ? { tone: 'done', text: 'Left' } : { tone: 'bad', text: 'Cancelled' }
+  const paid = t.status === 'inside' ? paidOnPhone(db, t) : 0
+  const until = paid > 0 ? paidUntil(db, t, paid) : undefined
+  const status = t.status === 'inside' ? (paid > 0 && b.duePaise === 0 ? { tone: 'ok', text: 'Paid' } : { tone: 'live', text: 'Parked' }) : t.status === 'paid' ? { tone: 'ok', text: 'Paid' } : t.status === 'exited' ? { tone: 'done', text: 'Left' } : { tone: 'bad', text: 'Cancelled' }
   return (
     <div className="cp">
       <section className="cp-card cp-veh">
@@ -544,13 +552,25 @@ export function Customer({ db, token }: { db: DB; token: string }) {
       </section>
 
       <section className={'cp-card cp-pay ' + status.tone}>
-        {t.status === 'inside' && <>
-          <small>{t.onlineCheckout ? 'Amount to pay' : 'To pay if you leave now'}</small>
+        {t.status === 'inside' && paid > 0 && b.duePaise === 0 && <>
+          <span className="cp-tick"><Ico n="check" size={26} /></span>
+          <small>Bill cleared</small>
+          <div className="cp-amount num">{rupees(paid)}</div>
+          <p className="cp-note ok">Paid online. Please collect your receipt at the exit gate.</p>
+          {until && <p className="cp-note">Covers your stay until <b>{fmtTime(until)}</b>. After that, {rupees(r.perHourPaise)} per extra hour is collected at the exit.</p>}
+        </>}
+        {t.status === 'inside' && (paid === 0 || b.duePaise > 0) && <>
+          <small>{paid > 0 ? 'Extra time to pay' : t.onlineCheckout && !t.onlineCheckout.byCustomer ? 'Amount to pay' : 'To pay if you leave now'}</small>
           <div className="cp-amount num">{rupees(b.duePaise)}</div>
-          {inGrace && <p className="cp-note ok">Free if you leave within {tv.graceMin} min of entry.</p>}
-          {b.lines.length > 0 && <div className="cp-lines">{b.lines.map((l, i) => <div key={i}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}</div>}
-          {db.razorpayEnabled && t.onlineCheckout
-            ? <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={s.operator} hasOrder linkUrl={t.onlineCheckout.linkUrl} upiQr={t.onlineCheckout.upiQr} qrImage={t.onlineCheckout.qrImage} />
+          {paid > 0 && <p className="cp-note">You already paid {rupees(paid)}. You stayed longer, so {rupees(b.duePaise)} more is due.</p>}
+          {inGrace && paid === 0 && <p className="cp-note ok">Free if you leave within {tv.graceMin} min of entry.</p>}
+          {b.lines.length > 0 && paid === 0 && <div className="cp-lines">{b.lines.map((l, i) => <div key={i}><span>{l.label}</span><b className="num">{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}</div>}
+          {db.razorpayEnabled && b.duePaise >= 100
+            ? <div className="cp-paybox">
+              <RazorpayCheckout key={t.id} ticketId={t.id} token={token} amount={b.duePaise} name={s.operator} hasOrder={Boolean(t.onlineCheckout)}
+                linkUrl={t.onlineCheckout?.linkUrl} upiQr={t.onlineCheckout?.byCustomer ? undefined : t.onlineCheckout?.upiQr} qrImage={t.onlineCheckout?.byCustomer ? undefined : t.onlineCheckout?.qrImage} />
+              <p className="cp-fine">Pay now with any UPI app, card or net banking (secured by Razorpay) and skip the queue. Collect your receipt at the exit.</p>
+            </div>
             : <p className="cp-note">Pay at the exit gate by <b>UPI</b> or <b>cash</b>. Show your slip there.</p>}
         </>}
         {(t.status === 'paid' || t.status === 'exited') && <>

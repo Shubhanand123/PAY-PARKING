@@ -30,6 +30,7 @@ export type Payment = { id: string; ticketId: string; amountPaise: number; metho
 export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number; linkUrl?: string
   upiQr?: string    // Razorpay UPI QR content (upi://pay?...), shown big on the POS
   qrImage?: string  // Razorpay's own QR image, used if upiQr is missing
+  byCustomer?: boolean // started by the customer on their phone (slip QR page): paying it does not end the stay
 }
 export type Ticket = {
   id: string            // human ticket number, e.g. T-000123
@@ -301,6 +302,19 @@ export function activeTariff(db: DB, at = Date.now()) {
   return [...db.tariffs].filter(t => t.createdAt <= at).sort((a, b) => b.version - a.version)[0] ?? db.tariffs[0]
 }
 
+/** Money the customer already paid on their phone for this stay (still inside). */
+export const paidOnPhone = (db: DB, t: Ticket) => db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').reduce((sum, p) => sum + p.amountPaise, 0)
+
+/** Until when the money already paid covers the stay (the next charged hour starts after this). */
+export function paidUntil(db: DB, t: Ticket, paidPaise: number) {
+  const tv = db.tariffs.find(x => x.id === t.tariffId)
+  const rate = tv?.rates[t.category]
+  if (!tv || !rate || paidPaise <= 0) return undefined
+  let hours = 0
+  while (hours < 24 * 7 && charge((hours + 1) * 60, rate, tv.graceMin).total <= paidPaise) hours++
+  return hours > 0 ? t.entryAt + hours * 60 * MIN : undefined
+}
+
 export const freeVehicleFor = (db: DB, plate: string) => (db.freeVehicles ?? []).find(v => v.active && v.plate === normPlate(plate))
 
 /** Freeze the receipt exactly as it will be printed. Called when the bill is paid. */
@@ -406,7 +420,8 @@ export const takeCash = (db: DB, s: Staff, id: string, rev: number, expectedPais
   t.status = 'paid'; t.billedAt = now; t.totalPaise = b.totalPaise; t.rev++
   if (b.free) t.free = b.free
   t.receipt = makeReceipt(db, t, s.name)
-  log(db, s, 'payment', b.free ? `Free vehicle (${b.free.reason}) · ${rupees(b.free.waivedPaise)} waived` : b.duePaise ? `Cash ${rupees(b.duePaise)} received` : 'Nothing due', id, b.duePaise)
+  const online = paidOnPhone(db, t)
+  log(db, s, 'payment', b.free ? `Free vehicle (${b.free.reason}) · ${rupees(b.free.waivedPaise)} waived` : b.duePaise ? `Cash ${rupees(b.duePaise)} received${online ? ' (extra time after paying on phone)' : ''}` : online ? `Paid on phone · nothing more due` : 'Nothing due', id, b.duePaise)
   return t
 }
 
@@ -423,10 +438,21 @@ export function settleOnlinePayment(db: DB, staff: Staff, ticket: Ticket, orderI
     return ticket
   }
   const previous = db.payments.find(payment => payment.providerPaymentId === paymentId)
-  if (previous?.ticketId === ticket.id && (ticket.status === 'paid' || ticket.status === 'exited')) return ticket
+  if (previous?.ticketId === ticket.id && (ticket.status === 'paid' || ticket.status === 'exited' || order.byCustomer)) return ticket
   if (previous || ticket.status !== 'inside') throw new Refused('This ticket cannot accept another payment.')
 
   const now = Date.now()
+  // Paid on the customer's phone before reaching the gate: the money is recorded and the vehicle stays "inside".
+  // At the exit the bill is worked out again for the real time; anything still due (a longer stay) is collected there.
+  if (order.byCustomer) {
+    const payment = addPayment(db, ticket, order.amount, staff.id, now, 'exit', 'razorpay')
+    payment.by = 'Customer (phone)'
+    payment.providerPaymentId = paymentId
+    delete ticket.onlineCheckout
+    ticket.rev++
+    log(db, staff, 'payment', `Customer paid ${rupees(order.amount)} on their phone (Razorpay) · receipt at the exit`, ticket.id, order.amount)
+    return ticket
+  }
   const payment = addPayment(db, ticket, order.amount, staff.id, now, 'exit', 'razorpay')
   payment.by = staff.name
   payment.providerPaymentId = paymentId

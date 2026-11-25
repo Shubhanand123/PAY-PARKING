@@ -558,3 +558,8 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 .cp-foot b { color: var(--color-text, #16181d); font-size: 14px; }
 .cp-foot a { color: #1747c8; font-weight: 700; text-decoration: none; padding: 6px 0; }
 @keyframes pop-in { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+.cp-paybox { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.cp-paybox .btn { width: 100%; }
+.cp-tick { display: grid; margin: 0 auto 8px; }
+.cp-veh-txt { min-width: 0; }
+.cp-plate { max-width: 100%; }

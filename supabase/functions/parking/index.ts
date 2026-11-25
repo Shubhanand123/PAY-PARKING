@@ -280,13 +280,24 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
       const { db, version } = attempt === 0 ? initial : await state()
       const fresh = select(db)
       if (!fresh || fresh.status !== 'inside') { dropEarly(); return reply({ error: 'This ticket is no longer awaiting payment.' }, 409) }
+      // A payment the customer started on their phone but did not finish: replace it with a fresh one
+      // (new amount, or the gate wants a UPI QR), once Razorpay confirms nothing was paid on it.
+      const abandoned = fresh.onlineCheckout?.byCustomer && !providerOrder && (fresh.onlineCheckout.amount !== amount || (actor && payload.upi_qr === true))
+      if (abandoned && fresh.onlineCheckout) {
+        if (razorpayOrderId.test(fresh.onlineCheckout.orderId) && await findCapturedPayment(razorpay, fresh.onlineCheckout.orderId)) {
+          dropEarly()
+          return reply({ error: 'The customer has just paid on their phone. Check payment status.' }, 409)
+        }
+        delete fresh.onlineCheckout
+      }
       if (fresh.onlineCheckout) {
         dropEarly()
         const order = fresh.onlineCheckout
         if (order.amount !== amount) return reply({ error: 'The amount changed. Refresh this ticket before paying.' }, 409)
         return reply({ order_id: order.orderId, amount: order.amount, currency: order.currency, key_id: razorpay.keyId, link_url: order.linkUrl, upi_qr: order.upiQr, qr_image: order.qrImage })
       }
-      if (!actor) return reply({ error: 'Ask the exit attendant to enable online payment for this ticket.' }, 409)
+      // The customer pays on their own phone with Razorpay's payment window (UPI apps, cards, net banking).
+      if (!actor && payload.upi_qr === true) return reply({ error: 'Pay with the Razorpay button on this page.' }, 400)
       const billedAt = Date.now()
       const bill = parking.billFor(db, fresh, billedAt)
       if (amount !== bill.duePaise || providerOrder && providerOrder.revision !== fresh.rev) {
@@ -322,13 +333,13 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
           if (!razorpayOrderId.test(created.id) || created.amount !== amount || created.currency !== currency || created.receipt !== receiptId) {
             throw new RazorpayServiceError('Razorpay returned an unexpected order.')
           }
-          providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: created.id } }
+          providerOrder = { revision: fresh.rev, checkout: { ...quote, orderId: created.id, ...(actor ? {} : { byCustomer: true }) } }
         }
       }
       fresh.onlineCheckout = providerOrder.checkout
       fresh.rev++
       const saved = await saveState(db, version)
-      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, link_url: fresh.onlineCheckout.linkUrl, upi_qr: fresh.onlineCheckout.upiQr, qr_image: fresh.onlineCheckout.qrImage, snapshot: publishState(saved, actor.role) })
+      if (saved) return reply({ order_id: fresh.onlineCheckout.orderId, amount, currency, key_id: razorpay.keyId, link_url: fresh.onlineCheckout.linkUrl, upi_qr: fresh.onlineCheckout.upiQr, qr_image: fresh.onlineCheckout.qrImage, ...(actor ? { snapshot: publishState(saved, actor.role) } : {}) })
     }
     return reply({ error: 'The ticket changed. Refresh and retry.' }, 409)
   }

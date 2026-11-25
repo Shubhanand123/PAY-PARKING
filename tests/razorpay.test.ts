@@ -106,7 +106,7 @@ test('parking Razorpay routes bind orders to quotes and settle captured payments
     assert.equal((await invoke('/create-order', request, false)).status, 401)
     assert.equal((await invoke('/create-order', { ...request, amount: 99 })).status, 400)
     assert.equal((await invoke('/create-order', { ...request, amount: amount + 1 })).status, 409)
-    assert.equal((await invoke('/create-order', { ...request, ticket_token: ticket.token }, false)).status, 409)
+    assert.equal((await invoke('/create-order', { ...request, ticket_token: ticket.token, upi_qr: true }, false)).status, 400) // customers pay in the Razorpay window, not by gate QR
     assert.equal(providerCreateCount, 0)
 
     ordersUnavailable = true
