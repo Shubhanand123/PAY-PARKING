@@ -500,3 +500,11 @@ body.has-update .gh-time { display: none; }
 
 /* Closing lines at the bottom of the slip and receipt */
 .slip-foot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #888; text-align: center; font-size: 11px; line-height: 1.45; }
+
+/* Smoothness on the POS: no moving blurred shapes or see-through blur (heavy for a POS graphics chip).
+   Same look, drawn once instead of every frame. */
+.glow.g1, .glow.g2 { animation: none !important; }
+.q9-over, .upd-pill { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.q9-over { background: rgb(255 255 255 / 96%); }
+.screen, .content, .stack { -webkit-overflow-scrolling: touch; }
+a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation; }

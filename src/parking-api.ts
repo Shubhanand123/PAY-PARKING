@@ -66,6 +66,7 @@ export async function syncOutbox() {
     showSnapshot()
   } catch { /* try again on the next round */ } finally { syncing = false }
 }
+let lastSnapText = ''
 export type PaymentEndpoint = 'create-order' | 'verify-payment' | 'check-payment' | 'switch-to-cash'
 type ParkingResponse = { snapshot?: Snapshot }
 
@@ -84,9 +85,14 @@ async function requestParking<T extends ParkingResponse>(body: unknown, setupKey
   if (!response.ok) throw new ParkingApiError(data.error ?? 'Parking server unavailable.', response.status)
   if (data.snapshot && data.snapshot.version >= version) {
     version = data.snapshot.version
-    serverSnapshot = data.snapshot
-    try { localStorage.setItem(SNAP_KEY, JSON.stringify(data.snapshot)) } catch { /* storage full: still works online */ }
-    showSnapshot()
+    // Most polls bring back exactly the same records: then nothing is redrawn, so the screen stays smooth.
+    const text = JSON.stringify(data.snapshot)
+    if (text !== lastSnapText) {
+      lastSnapText = text
+      serverSnapshot = data.snapshot
+      try { localStorage.setItem(SNAP_KEY, text) } catch { /* storage full: still works online */ }
+      showSnapshot()
+    }
   }
   return data as T
 }

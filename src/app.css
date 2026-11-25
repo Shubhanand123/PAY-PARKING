@@ -262,7 +262,7 @@ html,body{background:var(--color-bg-page)}
 /* Cash received celebration (celebrate.ts). Timeline: notes fly in 0–.8s, fold into coin .8–1.05s,
    coin flips to the tick at 1.45s with ripple + sparks, amount counts up, closes at 3.9s. */
 .cash-cel{position:fixed;inset:0;z-index:300;display:grid;place-items:center;padding:16px;cursor:pointer;overflow:hidden;
-  background:radial-gradient(circle at 50% 40%,rgba(26,158,90,.32),transparent 60%),rgba(9,16,38,.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  background:radial-gradient(circle at 50% 40%,rgba(26,158,90,.32),transparent 60%),rgba(9,16,38,.95);
   opacity:0;transition:opacity .22s ease-out}
 .cash-cel.cc-on{opacity:1}
 .cash-cel.cc-out{opacity:0;transition:opacity .32s ease-in}
