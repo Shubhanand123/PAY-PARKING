@@ -16,6 +16,13 @@
     </style>
 
 
+    <!-- Scanner: black from the first moment and no slide animation, so the camera screen appears at once. -->
+    <style name="ScanTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>

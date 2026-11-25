@@ -37,7 +37,7 @@
             android:name=".PlateScanActivity"
             android:exported="false"
             android:screenOrientation="portrait"
-            android:theme="@style/AppTheme.NoActionBar" />
+            android:theme="@style/ScanTheme" />
     </application>
 
     <!-- Permissions -->

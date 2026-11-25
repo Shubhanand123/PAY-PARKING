@@ -81,6 +81,7 @@ public class PlateScanActivity extends AppCompatActivity {
     // The text and QR readers are made once and kept, so the second scan onwards starts instantly.
     private static TextRecognizer sharedText;
     private static BarcodeScanner sharedQr;
+    private static volatile ProcessCameraProvider cameraProvider; // the camera system, started when the app opens
     static synchronized TextRecognizer textReader() {
         if (sharedText == null) sharedText = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         return sharedText;
@@ -97,7 +98,7 @@ public class PlateScanActivity extends AppCompatActivity {
                 InputImage img = InputImage.fromBitmap(tiny, 0);
                 Tasks.await(textReader().process(img));
                 Tasks.await(qrReader().process(img));
-                ProcessCameraProvider.getInstance(context.getApplicationContext());
+                cameraProvider = ProcessCameraProvider.getInstance(context.getApplicationContext()).get();
             } catch (Throwable ignored) { /* warming is only a speed-up */ }
         }).start();
     }
@@ -112,6 +113,7 @@ public class PlateScanActivity extends AppCompatActivity {
         root.setBackgroundColor(Color.BLACK);
         PreviewView preview = new PreviewView(this);
         preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+        preview.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
         root.addView(preview, match());
         overlay = new ScanOverlay(this);
         overlay.setPlateStyle(readsQr); // the exit screen reads ticket QRs too
@@ -149,33 +151,38 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     private void startCamera(PreviewView preview) {
+        if (cameraProvider != null) { bind(cameraProvider, preview); return; } // ready since app start: open at once
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
-            try {
-                ProcessCameraProvider provider = future.get();
-                Preview use = new Preview.Builder().build();
-                use.setSurfaceProvider(preview.getSurfaceProvider());
-                ResolutionSelector resolution = new ResolutionSelector.Builder()
-                    .setResolutionStrategy(new ResolutionStrategy(new Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
-                    .build();
-                ImageAnalysis frames = new ImageAnalysis.Builder()
-                    .setResolutionSelector(resolution)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .build();
-                frames.setAnalyzer(analysis, this::analyze);
-                provider.unbindAll();
-                camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, use, frames);
-                if (camera.getCameraInfo().hasFlashUnit()) light.setVisibility(View.VISIBLE);
-                // Focus and expose for the middle of the picture, where the plate is.
-                try {
-                    camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
-                        new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)).disableAutoCancel().build());
-                } catch (Throwable ignored) { /* the camera keeps its own focus */ }
-            } catch (Exception e) {
-                status.setText("The camera could not start. Tap Type manually.");
-            }
+            try { cameraProvider = future.get(); bind(cameraProvider, preview); }
+            catch (Exception e) { status.setText("The camera could not start. Tap Type manually."); }
         }, getMainExecutor());
+    }
+
+    private void bind(ProcessCameraProvider provider, PreviewView preview) {
+        try {
+            Preview use = new Preview.Builder().build();
+            use.setSurfaceProvider(preview.getSurfaceProvider());
+            ResolutionSelector resolution = new ResolutionSelector.Builder()
+                .setResolutionStrategy(new ResolutionStrategy(new Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                .build();
+            ImageAnalysis frames = new ImageAnalysis.Builder()
+                .setResolutionSelector(resolution)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build();
+            frames.setAnalyzer(analysis, this::analyze);
+            provider.unbindAll();
+            camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, use, frames);
+            if (camera.getCameraInfo().hasFlashUnit()) light.setVisibility(View.VISIBLE);
+            // Focus and expose for the middle of the picture, where the plate is.
+            try {
+                camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
+                    new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)).disableAutoCancel().build());
+            } catch (Throwable ignored) { /* the camera keeps its own focus */ }
+        } catch (Exception e) {
+            status.setText("The camera could not start. Tap Type manually.");
+        }
     }
 
     /** The band of the picture that is read for text: the middle half, where the on-screen frame is. Reading less is faster. */
@@ -290,6 +297,11 @@ public class PlateScanActivity extends AppCompatActivity {
         torchOn = !torchOn;
         camera.getCameraControl().enableTorch(torchOn);
         light.setText(torchOn ? "Light on" : "Light off");
+    }
+
+    @Override public void finish() {
+        super.finish();
+        overridePendingTransition(0, 0); // straight back to the form, no slide
     }
 
     @Override protected void onDestroy() {

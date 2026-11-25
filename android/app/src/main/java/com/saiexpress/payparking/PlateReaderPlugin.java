@@ -57,6 +57,7 @@ public class PlateReaderPlugin extends Plugin {
         Intent intent = new Intent(getContext(), PlateScanActivity.class);
         intent.putExtra(PlateScanActivity.EXTRA_QR, Boolean.TRUE.equals(call.getBoolean("qr", false)));
         intent.putExtra(PlateScanActivity.EXTRA_TITLE, call.getString("title", "Scan plate"));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
         startActivityForResult(call, intent, "scanResult");
     }
 
