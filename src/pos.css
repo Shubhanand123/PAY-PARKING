@@ -477,3 +477,19 @@ body.has-update .gh-time { display: none; }
 .q9-paid-check { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--color-success-bg); color: var(--color-success-text); }
 .q9-paid-check b { font-size: 15px; color: var(--color-text); }
 .q9-paid-check small { font-size: 12px; color: var(--color-text-secondary); }
+/* The slip as sent to the built-in printer (384 dots): bold enough for thermal paper */
+.slip-print .slip-sim { display: none !important; }
+.slip-print { font-size: 15px !important; line-height: 1.4 !important; font-weight: 600; }
+.slip-print .slip-h { font-size: 20px !important; font-weight: 800; }
+.slip-print .slip-s { font-size: 13px !important; color: #000 !important; font-weight: 600; }
+.slip-print .slip-big { background: #000 !important; color: #fff !important; letter-spacing: .3em; padding: 6px 0; margin: 6px 0 8px; font-weight: 800; font-size: 16px; }
+.slip-print .slip-row span { color: #000 !important; }
+.slip-print .slip-row b { font-weight: 800; }
+.slip-print .slip-plate { font-size: 26px !important; width: fit-content; margin: 8px auto !important; padding: 3px 12px 3px 6px !important; border: 3px solid #000 !important; border-radius: 6px; }
+.slip-print .slip-plate i { background: #000 !important; }
+.slip-print .slip-rules { border: 2px solid #000 !important; border-radius: 6px; padding: 7px 9px !important; font-size: 13px !important; color: #000; }
+.slip-print .slip-tot { font-size: 20px !important; border-top: 2px solid #000 !important; }
+.slip-print hr { border-top: 2px dashed #000 !important; }
+.slip-print .slip-qr-row { font-size: 13px !important; color: #000 !important; }
+.slip-print .slip-qr-row .qr-svg { width: 120px !important; height: 120px !important; }
+.slip-print .slip-free { border: 2px dashed #000 !important; }

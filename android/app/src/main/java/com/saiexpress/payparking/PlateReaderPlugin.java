@@ -6,6 +6,10 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
+import java.lang.reflect.Method;
 import android.os.Build;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
@@ -117,5 +121,64 @@ public class PlateReaderPlugin extends Plugin {
                 call.reject("Printing is not available on this device.");
             }
         });
+    }
+
+    // ---------- Built-in printer (Urovo-based POS such as the TVS i9200) ----------
+    // These terminals expose their thermal printer through the system class android.device.PrinterManager
+    // (the same one the "SPrinter" test app uses). It is called by reflection, so the app still installs and
+    // runs on phones without it; there the web page falls back to Android's print screen.
+    private Object printer() throws Exception {
+        Class<?> c = Class.forName("android.device.PrinterManager");
+        return c.getConstructor().newInstance();
+    }
+    private static Object call(Object target, String[] names, Class<?>[] types, Object... args) throws Exception {
+        for (String n : names) {
+            try { Method m = target.getClass().getMethod(n, types); return m.invoke(target, args); }
+            catch (NoSuchMethodException ignored) { /* try the next name */ }
+        }
+        throw new NoSuchMethodException(names[0]);
+    }
+
+    /** Is there a built-in printer we can drive directly? */
+    @PluginMethod
+    public void printerInfo(PluginCall call) {
+        JSObject out = new JSObject();
+        try { printer(); out.put("builtIn", true); } catch (Throwable e) { out.put("builtIn", false); out.put("reason", String.valueOf(e)); }
+        out.put("model", Build.MODEL); out.put("maker", Build.MANUFACTURER);
+        call.resolve(out);
+    }
+
+    /** Prints a black-and-white image (PNG, base64, 384 dots wide for 58 mm) straight on the built-in printer: no print screen. */
+    @PluginMethod
+    public void printImage(PluginCall call) {
+        String data = call.getString("image", "");
+        int gray = call.getInt("gray", 2);
+        new Thread(() -> {
+            Object pm = null;
+            try {
+                byte[] bytes = Base64.decode(data.replaceFirst("^data:image/[a-z]+;base64,", ""), Base64.DEFAULT);
+                Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bmp == null) { call.reject("The receipt image could not be read."); return; }
+                pm = printer();
+                call(pm, new String[] { "open", "prn_open" }, new Class<?>[0]);
+                try { call(pm, new String[] { "setGrayLevel", "prn_setBlack" }, new Class<?>[] { int.class }, gray); } catch (Throwable ignored) { /* optional */ }
+                Object status = null;
+                try { status = call(pm, new String[] { "getStatus", "prn_getStatus" }, new Class<?>[0]); } catch (Throwable ignored) { /* optional */ }
+                if (status instanceof Integer && (Integer) status == -1) { call.reject("The printer is out of paper."); return; }
+                call(pm, new String[] { "setupPage", "prn_setupPage" }, new Class<?>[] { int.class, int.class }, 384, -1);
+                call(pm, new String[] { "drawBitmap", "prn_drawBitmap" }, new Class<?>[] { Bitmap.class, int.class, int.class }, bmp, 0, 0);
+                Object ret = call(pm, new String[] { "printPage", "prn_printPage" }, new Class<?>[] { int.class }, 0);
+                try { call(pm, new String[] { "paperFeed", "prn_paperForWard" }, new Class<?>[] { int.class }, 64); } catch (Throwable ignored) { /* optional */ }
+                if (ret instanceof Integer && (Integer) ret < 0) { call.reject("The printer reported an error (" + ret + ")."); return; }
+                JSObject out = new JSObject(); out.put("printed", true); call.resolve(out);
+            } catch (ClassNotFoundException e) {
+                call.reject("NO_BUILT_IN_PRINTER");
+            } catch (Throwable e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                call.reject("Printing failed: " + cause);
+            } finally {
+                if (pm != null) try { call(pm, new String[] { "close", "prn_close" }, new Class<?>[0]); } catch (Throwable ignored) { /* already closed */ }
+            }
+        }).start();
     }
 }

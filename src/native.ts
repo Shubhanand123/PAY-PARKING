@@ -8,6 +8,8 @@ type PlateReaderPlugin = {
   version(): Promise<{ versionCode: number; versionName: string }>
   openExternal(options: { url: string }): Promise<void>
   print(options: { name: string }): Promise<void>
+  printerInfo(): Promise<{ builtIn: boolean; reason?: string; model: string; maker: string }>
+  printImage(options: { image: string; gray?: number }): Promise<{ printed: boolean }>
 }
 export const PlateReader = registerPlugin<PlateReaderPlugin>('PlateReader')
 export const nativeApp = Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('PlateReader')
