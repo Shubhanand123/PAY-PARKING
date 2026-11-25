@@ -148,6 +148,16 @@ public class PlateReaderPlugin extends Plugin {
         call.resolve(out);
     }
 
+    private static String statusText(int code) {
+        switch (code) {
+            case -1: return "The printer is out of paper.";
+            case -2: return "The printer is too hot. Wait a minute and try again.";
+            case -3: return "The battery is too low to print. Charge the POS.";
+            case -4: return "The printer is busy. Try again.";
+            default: return "The printer reported an error (" + code + ").";
+        }
+    }
+
     /** Prints a black-and-white image (PNG, base64, 384 dots wide for 58 mm) straight on the built-in printer: no print screen. */
     @PluginMethod
     public void printImage(PluginCall call) {
@@ -155,27 +165,31 @@ public class PlateReaderPlugin extends Plugin {
         int gray = call.getInt("gray", 2);
         new Thread(() -> {
             Object pm = null;
+            StringBuilder log = new StringBuilder();
             try {
                 byte[] bytes = Base64.decode(data.replaceFirst("^data:image/[a-z]+;base64,", ""), Base64.DEFAULT);
                 Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bmp == null) { call.reject("The receipt image could not be read."); return; }
+                log.append("img ").append(bmp.getWidth()).append("x").append(bmp.getHeight());
                 pm = printer();
-                call(pm, new String[] { "open", "prn_open" }, new Class<?>[0]);
-                try { call(pm, new String[] { "setGrayLevel", "prn_setBlack" }, new Class<?>[] { int.class }, gray); } catch (Throwable ignored) { /* optional */ }
-                Object status = null;
-                try { status = call(pm, new String[] { "getStatus", "prn_getStatus" }, new Class<?>[0]); } catch (Throwable ignored) { /* optional */ }
-                if (status instanceof Integer && (Integer) status == -1) { call.reject("The printer is out of paper."); return; }
-                call(pm, new String[] { "setupPage", "prn_setupPage" }, new Class<?>[] { int.class, int.class }, 384, -1);
-                call(pm, new String[] { "drawBitmap", "prn_drawBitmap" }, new Class<?>[] { Bitmap.class, int.class, int.class }, bmp, 0, 0);
+                log.append(" open=").append(call(pm, new String[] { "open", "prn_open" }, new Class<?>[0]));
+                try { log.append(" gray=").append(call(pm, new String[] { "setGrayLevel", "prn_setBlack" }, new Class<?>[] { int.class }, gray)); } catch (Throwable ignored) { /* optional */ }
+                // The status before printing is not reliable on every model (the i9200 says "no paper" with paper loaded),
+                // so it is only logged. The result of printPage decides.
+                try { log.append(" status=").append(call(pm, new String[] { "getStatus", "prn_getStatus" }, new Class<?>[0])); } catch (Throwable ignored) { /* optional */ }
+                log.append(" page=").append(call(pm, new String[] { "setupPage", "prn_setupPage" }, new Class<?>[] { int.class, int.class }, 384, -1));
+                log.append(" draw=").append(call(pm, new String[] { "drawBitmap", "prn_drawBitmap" }, new Class<?>[] { Bitmap.class, int.class, int.class }, bmp, 0, 0));
                 Object ret = call(pm, new String[] { "printPage", "prn_printPage" }, new Class<?>[] { int.class }, 0);
+                if (ret instanceof Integer && (Integer) ret == -4) { Thread.sleep(600); ret = call(pm, new String[] { "printPage", "prn_printPage" }, new Class<?>[] { int.class }, 0); }
+                log.append(" print=").append(ret);
                 try { call(pm, new String[] { "paperFeed", "prn_paperForWard" }, new Class<?>[] { int.class }, 64); } catch (Throwable ignored) { /* optional */ }
-                if (ret instanceof Integer && (Integer) ret < 0) { call.reject("The printer reported an error (" + ret + ")."); return; }
-                JSObject out = new JSObject(); out.put("printed", true); call.resolve(out);
+                if (ret instanceof Integer && (Integer) ret < 0) { call.reject(statusText((Integer) ret) + " [" + log + "]"); return; }
+                JSObject out = new JSObject(); out.put("printed", true); out.put("log", log.toString()); call.resolve(out);
             } catch (ClassNotFoundException e) {
                 call.reject("NO_BUILT_IN_PRINTER");
             } catch (Throwable e) {
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
-                call.reject("Printing failed: " + cause);
+                call.reject("Printing failed: " + cause + " [" + log + "]");
             } finally {
                 if (pm != null) try { call(pm, new String[] { "close", "prn_close" }, new Class<?>[0]); } catch (Throwable ignored) { /* already closed */ }
             }
