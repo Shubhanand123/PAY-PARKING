@@ -98,6 +98,7 @@ public class PlateScanActivity extends AppCompatActivity {
                 InputImage img = InputImage.fromBitmap(tiny, 0);
                 Tasks.await(textReader().process(img));
                 Tasks.await(qrReader().process(img));
+                PlateFinder.get(context); // load the plate finder model now, not on the first scan
                 cameraProvider = ProcessCameraProvider.getInstance(context.getApplicationContext()).get();
             } catch (Throwable ignored) { /* warming is only a speed-up */ }
         }).start();
@@ -213,12 +214,43 @@ public class PlateScanActivity extends AppCompatActivity {
             frame.close(); return;
         }
         frame.close(); // free the camera straight away for the next picture
-        int top = Math.round(upright.getHeight() * BAND_TOP), bandH = Math.round(upright.getHeight() * (BAND_BOTTOM - BAND_TOP));
-        Bitmap band = Bitmap.createBitmap(upright, 0, top, upright.getWidth(), bandH);
+        // 1. The plate finder boxes the plate (tens of ms); 2. the text reader reads only that box.
+        // No box found: read the middle band of the picture, as before.
+        Bitmap band = null;
+        long t0 = System.nanoTime();
+        PlateFinder finder = PlateFinder.get(this);
+        if (finder != null) {
+            try {
+                android.graphics.Rect box = finder.find(upright);
+                if (box != null) {
+                    int mx = Math.round(box.width() * 0.12f), my = Math.round(box.height() * 0.35f);
+                    int x1 = Math.max(0, box.left - mx), y1 = Math.max(0, box.top - my);
+                    int x2 = Math.min(upright.getWidth(), box.right + mx), y2 = Math.min(upright.getHeight(), box.bottom + my);
+                    if (x2 - x1 > 16 && y2 - y1 > 8) {
+                        band = Bitmap.createBitmap(upright, x1, y1, x2 - x1, y2 - y1);
+                        // Small, far-away plates: enlarge so every letter has enough pixels to read.
+                        if (band.getHeight() < 96) {
+                            float k = 96f / band.getHeight();
+                            band = Bitmap.createScaledBitmap(band, Math.round(band.getWidth() * k), 96, true);
+                        }
+                    }
+                }
+            } catch (Throwable e) { band = null; }
+        }
+        finderMs = (System.nanoTime() - t0) / 1_000_000;
+        boolean boxed = band != null;
+        if (band == null) {
+            int top = Math.round(upright.getHeight() * BAND_TOP), bandH = Math.round(upright.getHeight() * (BAND_BOTTOM - BAND_TOP));
+            band = Bitmap.createBitmap(upright, 0, top, upright.getWidth(), bandH);
+        }
         int width = band.getWidth(), height = band.getHeight();
+        final boolean usedFinder = boxed;
+        long t1 = System.nanoTime();
         Task<Text> reading = text.process(InputImage.fromBitmap(band, 0));
         Task<List<Barcode>> codes = qr != null ? qr.process(InputImage.fromBitmap(upright, 0)) : Tasks.forResult(Collections.emptyList());
         try { Tasks.await(Tasks.whenAllComplete(reading, codes)); } catch (Exception ignored) { /* handled below */ }
+        readerMs = (System.nanoTime() - t1) / 1_000_000;
+        lastBoxed = usedFinder;
         main.post(() -> {
             if (finished) return;
             if (codes.isSuccessful()) for (Barcode code : codes.getResult()) {
@@ -293,8 +325,11 @@ public class PlateScanActivity extends AppCompatActivity {
         data.putExtra(RESULT_ALTERNATIVES, alternatives.toArray(new String[0]));
         setResult(RESULT_OK, data);
         overlay.setState(ScanOverlay.State.DONE, pretty(plate));
-        status.setText("Got it");
-        main.postDelayed(this::finish, 300); // a short "got it" moment, then back to the form
+        // Timing line, so the speed can be checked at the gate.
+        PlateFinder f = PlateFinder.get(this);
+        String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
+        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + read " + readerMs + " ms" : " · read " + readerMs + " ms"));
+        main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 
     private void cancel() {
@@ -311,6 +346,9 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     private Runnable refocus;
+    private volatile long finderMs, readerMs;
+    private volatile boolean lastBoxed;
+    private long shownAt;
     private void focusAt(PreviewView preview, float x, float y) {
         if (camera == null) return;
         try {
@@ -325,6 +363,7 @@ public class PlateScanActivity extends AppCompatActivity {
         if (shown) return;
         shown = true;
         root.animate().alpha(1f).setDuration(120).start();
+        shownAt = System.currentTimeMillis();
     }
 
     @Override public void finish() {
