@@ -13,16 +13,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.util.Collections;
-import java.util.EnumSet;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
-import ai.onnxruntime.providers.NNAPIFlags;
 
 /**
  * Finds the number plate in a camera picture (YOLOv9-tiny, 256 x 256, trained on plates; MIT, open-image-models).
- * Runs on the phone's AI chip (NNAPI) when it has one, otherwise on all CPU cores.
+ * Runs on the CPU (all cores). Protected by a crash guard: if it ever takes the app down, it stays off on that phone.
  * Returns the plate box in the picture's own pixels, so the text reader only has to read that small box.
  */
 final class PlateFinder {
@@ -31,24 +29,38 @@ final class PlateFinder {
     private static final float MIN_SCORE = 0.3f;
 
     private static PlateFinder shared;
-    private static boolean failed, cpuOnly;
-    private int errors;
+    private static boolean failed;
+    private int errors, worked;
+    private android.content.SharedPreferences prefs; // the crash-guard flag is cleared after a few real frames worked
 
     private final OrtEnvironment env;
     private final OrtSession session;
     private final String inputName;
-    final String engine; // "AI chip" or "CPU", shown in the timing line
+    final String engine; // shown in the timing line
     private final Bitmap board = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
     private final Canvas canvas = new Canvas(board);
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final int[] pixels = new int[SIZE * SIZE];
     private final FloatBuffer input = FloatBuffer.allocate(3 * SIZE * SIZE);
 
+    // Crash guard: a flag is written before the model first loads and runs, and cleared once it has worked.
+    // If the app is killed in between (a native crash), the flag is still there at the next start and the finder
+    // stays switched off on this phone; the scanner then reads the plate the old way.
+    private static final String PREFS = "plate_finder", TRYING = "trying_v1", OFF = "off_v1";
+
     /** The shared finder, loaded once (at app start by warmUp). Null if the model can't run on this phone. */
     static synchronized PlateFinder get(Context context) {
         if (shared == null && !failed) {
-            try { shared = new PlateFinder(context.getApplicationContext()); }
-            catch (Throwable e) { failed = true; Log.w(TAG, "Plate finder unavailable: " + e); }
+            android.content.SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            if (prefs.getBoolean(OFF, false)) { failed = true; return null; }
+            if (prefs.getBoolean(TRYING, false)) { // it crashed last time: never try again on this phone
+                prefs.edit().putBoolean(OFF, true).remove(TRYING).commit();
+                failed = true; Log.w(TAG, "Plate finder crashed earlier on this phone: switched off");
+                return null;
+            }
+            prefs.edit().putBoolean(TRYING, true).commit();
+            try { shared = new PlateFinder(context.getApplicationContext()); shared.prefs = prefs; }
+            catch (Throwable e) { failed = true; prefs.edit().remove(TRYING).commit(); Log.w(TAG, "Plate finder unavailable: " + e); }
         }
         return shared;
     }
@@ -56,22 +68,12 @@ final class PlateFinder {
     private PlateFinder(Context context) throws Exception {
         byte[] model = read(context, "models/plate_finder_256.onnx");
         env = OrtEnvironment.getEnvironment();
-        OrtSession s = null;
+        // CPU only: the AI-chip path (NNAPI) crashed the whole app on a POS (a native crash that can't be caught).
+        OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
+        cpu.setIntraOpNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())));
+        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
+        OrtSession s = env.createSession(model, cpu);
         String used = "CPU";
-        if (!cpuOnly) try {
-            OrtSession.SessionOptions ai = new OrtSession.SessionOptions();
-            ai.addNnapi(EnumSet.of(NNAPIFlags.USE_FP16));
-            s = env.createSession(model, ai);
-            used = "AI chip";
-        } catch (Throwable e) {
-            Log.i(TAG, "No AI chip support, using the CPU: " + e);
-        }
-        if (s == null) {
-            OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-            cpu.setIntraOpNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())));
-            cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
-            s = env.createSession(model, cpu);
-        }
         session = s;
         engine = used;
         inputName = session.getInputNames().iterator().next();
@@ -86,13 +88,13 @@ final class PlateFinder {
         }
     }
 
-    /** Runs the model. If the AI chip keeps failing on this phone, switch to the CPU for the rest of the session. */
+    /** Runs the model. If it keeps failing, the finder is switched off for this session. */
     private OrtSession.Result run(OnnxTensor tensor) throws Exception {
         try { return session.run(Collections.singletonMap(inputName, tensor)); }
         catch (Exception e) {
-            if (++errors >= 3 && "AI chip".equals(engine)) {
-                Log.w(TAG, "AI chip failed, switching to the CPU: " + e);
-                synchronized (PlateFinder.class) { cpuOnly = true; shared = null; }
+            if (++errors >= 3) {
+                Log.w(TAG, "Plate finder keeps failing: switched off for this session: " + e);
+                synchronized (PlateFinder.class) { failed = true; shared = null; }
             }
             throw e;
         }
@@ -128,6 +130,7 @@ final class PlateFinder {
                 double score = row[6] - (cx * cx + cy * cy); // sure, and near the middle
                 if (score > bestScore) { bestScore = score; best = new Rect(Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)); }
             }
+            if (prefs != null && ++worked == 5) prefs.edit().remove(TRYING).apply(); // proven safe on this phone
             return best;
         }
     }
