@@ -98,7 +98,6 @@ public class PlateScanActivity extends AppCompatActivity {
                 InputImage img = InputImage.fromBitmap(tiny, 0);
                 Tasks.await(textReader().process(img));
                 Tasks.await(qrReader().process(img));
-                PlateFinder.get(context); // load the plate finder model now, not on the first scan
                 cameraProvider = ProcessCameraProvider.getInstance(context.getApplicationContext()).get();
             } catch (Throwable ignored) { /* warming is only a speed-up */ }
         }).start();
@@ -107,6 +106,7 @@ public class PlateScanActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         boolean readsQr = getIntent().getBooleanExtra(EXTRA_QR, false);
+        PlateFinder.loadInBackground(this); // only when scanning: the app itself never depends on it
         text = textReader();
         if (readsQr) qr = qrReader();
 
@@ -218,7 +218,7 @@ public class PlateScanActivity extends AppCompatActivity {
         // No box found: read the middle band of the picture, as before.
         Bitmap band = null;
         long t0 = System.nanoTime();
-        PlateFinder finder = PlateFinder.get(this);
+        PlateFinder finder = PlateFinder.ready(); // not loaded yet: read the old way for these first frames
         if (finder != null) {
             try {
                 android.graphics.Rect box = finder.find(upright);
@@ -326,7 +326,7 @@ public class PlateScanActivity extends AppCompatActivity {
         setResult(RESULT_OK, data);
         overlay.setState(ScanOverlay.State.DONE, pretty(plate));
         // Timing line, so the speed can be checked at the gate.
-        PlateFinder f = PlateFinder.get(this);
+        PlateFinder f = PlateFinder.ready();
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
         status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + read " + readerMs + " ms" : " · read " + readerMs + " ms"));
         main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form

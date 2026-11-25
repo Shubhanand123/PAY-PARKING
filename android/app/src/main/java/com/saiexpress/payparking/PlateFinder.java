@@ -28,10 +28,9 @@ final class PlateFinder {
     private static final int SIZE = 256;
     private static final float MIN_SCORE = 0.3f;
 
-    private static PlateFinder shared;
+    private static volatile PlateFinder shared;
     private static boolean failed;
-    private int errors, worked;
-    private android.content.SharedPreferences prefs; // the crash-guard flag is cleared after a few real frames worked
+    private int errors;
 
     private final OrtEnvironment env;
     private final OrtSession session;
@@ -48,7 +47,17 @@ final class PlateFinder {
     // stays switched off on this phone; the scanner then reads the plate the old way.
     private static final String PREFS = "plate_finder", TRYING = "trying_v1", OFF = "off_v1";
 
-    /** The shared finder, loaded once (at app start by warmUp). Null if the model can't run on this phone. */
+    /** The finder if it is already loaded, without waiting (the scanner reads the old way until then). */
+    static PlateFinder ready() { return shared; }
+
+    /** Loads the finder in the background (called when the scanner opens, never at app start). */
+    static void loadInBackground(Context context) {
+        if (shared != null || failed) return;
+        Context app = context.getApplicationContext();
+        new Thread(() -> get(app), "plate-finder-load").start();
+    }
+
+    /** The shared finder, loaded once. Null if the model can't run on this POS. */
     static synchronized PlateFinder get(Context context) {
         if (shared == null && !failed) {
             android.content.SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -59,7 +68,7 @@ final class PlateFinder {
                 return null;
             }
             prefs.edit().putBoolean(TRYING, true).commit();
-            try { shared = new PlateFinder(context.getApplicationContext()); shared.prefs = prefs; }
+            try { shared = new PlateFinder(context.getApplicationContext()); prefs.edit().remove(TRYING).commit(); }
             catch (Throwable e) { failed = true; prefs.edit().remove(TRYING).commit(); Log.w(TAG, "Plate finder unavailable: " + e); }
         }
         return shared;
@@ -130,7 +139,6 @@ final class PlateFinder {
                 double score = row[6] - (cx * cx + cy * cy); // sure, and near the middle
                 if (score > bestScore) { bestScore = score; best = new Rect(Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)); }
             }
-            if (prefs != null && ++worked == 5) prefs.edit().remove(TRYING).apply(); // proven safe on this phone
             return best;
         }
     }
