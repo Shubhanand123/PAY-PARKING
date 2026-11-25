@@ -16,11 +16,11 @@
     </style>
 
 
-    <!-- Scanner: black from the first moment and no slide animation, so the camera screen appears at once. -->
+    <!-- Scanner: see-through until the camera picture is ready (no black screen), and no slide animation. -->
     <style name="ScanTheme" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowAnimationStyle">@null</item>
-        <item name="android:windowDisablePreview">false</item>
     </style>
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">

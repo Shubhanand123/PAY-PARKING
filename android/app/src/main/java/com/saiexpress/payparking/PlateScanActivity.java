@@ -111,9 +111,13 @@ public class PlateScanActivity extends AppCompatActivity {
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+        // Nothing is shown until the camera's first picture is ready: the form stays on screen instead of a black screen.
+        root.setAlpha(0f);
         PreviewView preview = new PreviewView(this);
         preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-        preview.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
+        preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE); // fades in smoothly
+        preview.getPreviewStreamState().observe(this, state -> { if (state == PreviewView.StreamState.STREAMING) reveal(root); });
+        main.postDelayed(() -> reveal(root), 1500); // show the screen anyway if the camera is slow
         root.addView(preview, match());
         overlay = new ScanOverlay(this);
         overlay.setPlateStyle(readsQr); // the exit screen reads ticket QRs too
@@ -297,6 +301,13 @@ public class PlateScanActivity extends AppCompatActivity {
         torchOn = !torchOn;
         camera.getCameraControl().enableTorch(torchOn);
         light.setText(torchOn ? "Light on" : "Light off");
+    }
+
+    private boolean shown;
+    private void reveal(View root) {
+        if (shown) return;
+        shown = true;
+        root.animate().alpha(1f).setDuration(120).start();
     }
 
     @Override public void finish() {
