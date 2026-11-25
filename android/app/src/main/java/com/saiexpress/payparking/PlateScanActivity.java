@@ -119,6 +119,7 @@ public class PlateScanActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         boolean readsQr = getIntent().getBooleanExtra(EXTRA_QR, false);
         PlateFinder.loadInBackground(this); // only when scanning: the app itself never depends on it
+        PlateTextReader.loadInBackground(this);
         text = textReader();
         if (readsQr) qr = qrReader();
 
@@ -255,6 +256,24 @@ public class PlateScanActivity extends AppCompatActivity {
             int top = Math.round(upright.getHeight() * BAND_TOP), bandH = Math.round(upright.getHeight() * (BAND_BOTTOM - BAND_TOP));
             band = Bitmap.createBitmap(upright, 0, top, upright.getWidth(), bandH);
         }
+        // Our Indian plate reader on the plate box (about 10 ms). A sure reading of a valid plate is taken at once;
+        // anything less sure goes to ML Kit as before.
+        PlateTextReader ours = boxed ? PlateTextReader.ready() : null;
+        if (ours != null) {
+            try {
+                long tr = System.nanoTime();
+                PlateTextReader.Reading rd = ours.read(band);
+                readerMs = (System.nanoTime() - tr) / 1_000_000;
+                String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
+                if (plate != null && rd.confidence >= 0.9f) {
+                    final Bitmap seen = band;
+                    lastBoxed = true; ownReader = true;
+                    main.post(() -> { if (!finished) { lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });
+                    return;
+                }
+            } catch (Throwable ignored) { /* fall back to ML Kit */ }
+        }
+        ownReader = false;
         int width = band.getWidth(), height = band.getHeight();
         final boolean usedFinder = boxed;
         long t1 = System.nanoTime();
@@ -344,7 +363,7 @@ public class PlateScanActivity extends AppCompatActivity {
         // Timing line, so the speed can be checked at the gate.
         PlateFinder f = PlateFinder.ready();
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
-        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + read " + readerMs + " ms" : " · read " + readerMs + " ms"));
+        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
         main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 
@@ -363,7 +382,7 @@ public class PlateScanActivity extends AppCompatActivity {
 
     private Runnable refocus;
     private volatile long finderMs, readerMs;
-    private volatile boolean lastBoxed;
+    private volatile boolean lastBoxed, ownReader;
     private long shownAt;
     private void focusAt(PreviewView preview, float x, float y) {
         if (camera == null) return;
