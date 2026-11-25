@@ -18,7 +18,8 @@ export async function slipImage(): Promise<string | undefined> {
   holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + DOTS + 'px;background:#fff;z-index:-1'
   const copy = slip.cloneNode(true) as HTMLElement
   copy.classList.add('slip-print')
-  copy.style.cssText = 'width:' + DOTS + 'px;max-width:none;margin:0;padding:10px 8px 18px;background:#fff;color:#000;box-shadow:none;border-radius:0;-webkit-mask:none;mask:none'
+  // 130 dots (~16 mm) of blank paper at the bottom, so the slip comes out far enough to tear off cleanly.
+  copy.style.cssText = 'width:' + DOTS + 'px;max-width:none;margin:0;padding:10px 8px 130px;background:#fff;color:#000;box-shadow:none;border-radius:0;-webkit-mask:none;mask:none'
   holder.append(copy)
   document.body.append(holder)
   try {
