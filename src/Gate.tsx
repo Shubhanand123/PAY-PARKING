@@ -562,7 +562,7 @@ export function Customer({ db, token }: { db: DB; token: string }) {
           {until && <div className="cp-cover">
             <div className="cp-cover-top"><span>Covered until <b>{fmtTime(until)}</b></span><b className="num">{dur(Math.max(0, until - now))} left</b></div>
             <div className="cp-cover-bar"><i style={{ width: Math.min(100, Math.max(3, (now - t.entryAt) / (until - t.entryAt) * 100)) + '%' }} /></div>
-            <small>After that, {rupees(r.perHourPaise)} per extra hour is collected at the exit.</small>
+            <small>Please leave by <b>{fmtTime(until)}</b>. If you stay longer, the extra time is worked out again and collected at the exit ({rupees(r.perHourPaise)} per extra hour).</small>
           </div>}
           <div className="cp-collect"><Ico n="print" size={22} /><span><b>Collect your receipt at the exit gate.</b> Show your slip or this screen.</span></div>
         </>}

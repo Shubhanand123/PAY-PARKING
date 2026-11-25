@@ -186,10 +186,17 @@ export function prepaidPrice(hours: number, rate: Rate) {
   return charge(hours * 60, rate, 0).total
 }
 
+/** Minutes to drive out after paying online, before the stay is billed again. */
+export const PAID_LEAVE_MIN = 5
+
 export function billFor(db: DB, t: Ticket, at: number): Bill {
   const tv = db.tariffs.find(x => x.id === t.tariffId)!
   const rate = tv.rates[t.category]
-  const minutes = Math.floor(((t.billedAt ?? t.onlineCheckout?.billedAt ?? t.exitAt ?? at) - t.entryAt) / MIN)
+  // Paid online before reaching the exit: the next PAID_LEAVE_MIN minutes cost nothing more (time to drive out).
+  // Later than that, the stay is billed again for the real time and only the difference is due at the exit.
+  const lastOnline = t.status === 'inside' ? Math.max(0, ...db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').map(p => p.at)) : 0
+  const billAt = lastOnline && at >= lastOnline && at - lastOnline <= PAID_LEAVE_MIN * MIN ? lastOnline : at
+  const minutes = Math.floor(((t.billedAt ?? t.onlineCheckout?.billedAt ?? t.exitAt ?? billAt) - t.entryAt) / MIN)
   const c = charge(minutes, rate, tv.graceMin)
   const prepaid = db.payments.filter(p => p.ticketId === t.id && p.kind === 'prepaid').reduce((s, p) => s + p.amountPaise, 0)
   const paidExit = db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').reduce((s, p) => s + p.amountPaise, 0)
@@ -312,7 +319,10 @@ export function paidUntil(db: DB, t: Ticket, paidPaise: number) {
   if (!tv || !rate || paidPaise <= 0) return undefined
   let hours = 0
   while (hours < 24 * 7 && charge((hours + 1) * 60, rate, tv.graceMin).total <= paidPaise) hours++
-  return hours > 0 ? t.entryAt + hours * 60 * MIN : undefined
+  // Covered to the end of the paid hours, and always at least PAID_LEAVE_MIN minutes after the last online payment.
+  const lastOnline = Math.max(0, ...db.payments.filter(p => p.ticketId === t.id && p.kind === 'exit').map(p => p.at))
+  const end = Math.max(hours > 0 ? t.entryAt + hours * 60 * MIN : 0, lastOnline ? lastOnline + PAID_LEAVE_MIN * MIN : 0)
+  return end || undefined
 }
 
 export const freeVehicleFor = (db: DB, plate: string) => (db.freeVehicles ?? []).find(v => v.active && v.plate === normPlate(plate))
