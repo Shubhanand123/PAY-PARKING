@@ -10,6 +10,7 @@ type PlateReaderPlugin = {
   print(options: { name: string }): Promise<void>
   printerInfo(): Promise<{ builtIn: boolean; reason?: string; model: string; maker: string }>
   printImage(options: { image: string; gray?: number }): Promise<{ printed: boolean; log?: string }>
+  addListener(event: 'hardwareScan', listener: (scan: { value: string }) => void): Promise<{ remove: () => Promise<void> }>
 }
 export const PlateReader = registerPlugin<PlateReaderPlugin>('PlateReader')
 export const nativeApp = Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('PlateReader')

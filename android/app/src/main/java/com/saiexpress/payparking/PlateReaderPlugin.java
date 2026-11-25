@@ -36,6 +36,48 @@ public class PlateReaderPlugin extends Plugin {
     @Override
     public void load() {
         PlateScanActivity.warmUp(getContext()); // load the camera and text reader early: the first scan opens fast
+        listenToHardwareScanner();
+    }
+
+    // ---------- Built-in barcode scanner (the POS's scan button) ----------
+    // Urovo-based POS machines (TVS i9200) can send each scan as a system broadcast instead of typing it.
+    // Every common broadcast name is listened to, and the scan is passed to the page as a "hardwareScan" event.
+    private static final String[] SCAN_ACTIONS = {
+        "android.intent.ACTION_DECODE_DATA", "android.intent.action.SCANRESULT", "com.android.server.scannerservice.broadcast",
+        "urovo.rcv.message", "scanner.rcv.message", "com.scanner.broadcast", "android.intent.action.SCAN_RESULT",
+    };
+    private static final String[] SCAN_EXTRAS = { "barcode_string", "barcodeData", "scannerdata", "data", "value", "decode_data", "SCAN_BARCODE1", "barocode" };
+    private android.content.BroadcastReceiver scanReceiver;
+
+    private void listenToHardwareScanner() {
+        scanReceiver = new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                String value = null;
+                for (String key : SCAN_EXTRAS) {
+                    Object v = intent.getExtras() != null ? intent.getExtras().get(key) : null;
+                    if (v instanceof String && !((String) v).isEmpty()) { value = (String) v; break; }
+                    if (v instanceof byte[] && ((byte[]) v).length > 0) {
+                        int len = intent.getIntExtra("length", ((byte[]) v).length);
+                        value = new String((byte[]) v, 0, Math.min(len, ((byte[]) v).length), java.nio.charset.StandardCharsets.UTF_8);
+                        break;
+                    }
+                }
+                if (value == null) return;
+                JSObject out = new JSObject();
+                out.put("value", value.trim());
+                notifyListeners("hardwareScan", out);
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter();
+        for (String a : SCAN_ACTIONS) filter.addAction(a);
+        try { androidx.core.content.ContextCompat.registerReceiver(getContext(), scanReceiver, filter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED); }
+        catch (Throwable ignored) { /* no scanner service */ }
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (scanReceiver != null) try { getContext().unregisterReceiver(scanReceiver); } catch (Throwable ignored) { /* not registered */ }
+        super.handleOnDestroy();
     }
 
     @PluginMethod

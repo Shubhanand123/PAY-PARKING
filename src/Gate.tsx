@@ -6,7 +6,7 @@ import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
 import { createWedgeReader } from './scanner-wedge'
-import { nativeApp } from './native'
+import { nativeApp, PlateReader } from './native'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
@@ -317,7 +317,7 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
   const wedge = useRef({ find, reset, toast, ticket: t })
   useEffect(() => { wedge.current = { find, reset, toast, ticket: t } })
   useEffect(() => {
-    const read = createWedgeReader(value => {
+    const scanned = (value: string) => {
       const { find, reset, toast, ticket } = wedge.current
       if (ticket && ticket.status !== 'exited' && ticket.status !== 'cancelled') {
         toast('Finish this ticket, then tap New lookup before scanning the next one.', true)
@@ -326,13 +326,19 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
       reset()
       setScanningPlate(false)
       find('auto', value)
-    })
+    }
+    const read = createWedgeReader(scanned)
     const onKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return
       if (read(event.key, event.timeStamp)) { event.preventDefault(); event.stopPropagation() }
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    // The scanner can also send its reading as a system message (Urovo "broadcast" mode): the app passes it here.
+    let stop: (() => void) | undefined
+    let alive = true
+    if (nativeApp) void PlateReader.addListener('hardwareScan', ({ value }) => { if (value) scanned(value) })
+      .then(handle => { if (alive) stop = () => void handle.remove(); else void handle.remove() }).catch(() => {})
+    return () => { alive = false; window.removeEventListener('keydown', onKey, true); stop?.() }
   }, [])
 
   if (t) {
@@ -455,7 +461,10 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
         <label className="lbl" htmlFor="q">Manual lookup</label>
         <div className="find-row">
           <input id="q" className="field plate-field" value={q} autoComplete="off" enterKeyHint="search" placeholder="Plate or ticket" onChange={e => {
-            setQ(e.target.value); setPick(null); setScannedPlate(false); setPlateAlternatives([])
+            const value = e.target.value
+            // The built-in scanner typed a slip QR into this box: open the ticket at once, no Enter needed.
+            if (/#\/t\/[a-f0-9]{32}/i.test(value)) { setQ(''); find('qr', value.trim()); return }
+            setQ(value); setPick(null); setScannedPlate(false); setPlateAlternatives([])
           }} onKeyDown={e => e.key === 'Enter' && find('auto')} />
           <button className="btn btn-primary find-btn" onClick={() => find('auto')} disabled={!q.trim()} aria-label="Find ticket"><Ico n="search" size={22} /> Find</button>
         </div>
