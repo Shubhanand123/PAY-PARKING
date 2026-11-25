@@ -179,18 +179,25 @@ public class PlateScanActivity extends AppCompatActivity {
             provider.unbindAll();
             camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, use, frames);
             if (camera.getCameraInfo().hasFlashUnit()) light.setVisibility(View.VISIBLE);
-            // Focus and expose for the middle of the picture, where the plate is.
-            try {
-                camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
-                    new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)).disableAutoCancel().build());
-            } catch (Throwable ignored) { /* the camera keeps its own focus */ }
+            // Focus and expose for the middle (where the plate is), then go back to continuous focus.
+            // Refocused every 3 s while no plate is found, and on a tap anywhere on the picture.
+            focusAt(preview, 0.5f, 0.5f);
+            main.postDelayed(refocus = () -> {
+                if (finished) return;
+                if (System.currentTimeMillis() - lastSeen > 2500) focusAt(preview, 0.5f, 0.5f);
+                main.postDelayed(refocus, 3000);
+            }, 3000);
+            preview.setOnTouchListener((v, e) -> {
+                if (e.getAction() == android.view.MotionEvent.ACTION_UP) focusAt(preview, e.getX() / v.getWidth(), e.getY() / v.getHeight());
+                return true;
+            });
         } catch (Exception e) {
             status.setText("The camera could not start. Tap Type manually.");
         }
     }
 
     /** The band of the picture that is read for text: the middle half, where the on-screen frame is. Reading less is faster. */
-    private static final float BAND_TOP = 0.25f, BAND_BOTTOM = 0.75f;
+    private static final float BAND_TOP = 0.16f, BAND_BOTTOM = 0.84f; // generous: the plate is caught even when not centred
 
     private void analyze(ImageProxy frame) {
         if (finished) { frame.close(); return; }
@@ -238,7 +245,7 @@ public class PlateScanActivity extends AppCompatActivity {
             if (distance < bestDistance) {
                 bestDistance = distance; best = plate;
                 // Read cleanly in one go: valid as read (no look-alike fixes) and the reader is sure of every letter.
-                bestClear = confidence >= 0.85f && plate.equals(PlateRules.directFromLines(lines));
+                bestClear = confidence >= 0.7f && plate.equals(PlateRules.directFromLines(lines));
             }
         }
         final String clear = best;
@@ -301,6 +308,16 @@ public class PlateScanActivity extends AppCompatActivity {
         torchOn = !torchOn;
         camera.getCameraControl().enableTorch(torchOn);
         light.setText(torchOn ? "Light on" : "Light off");
+    }
+
+    private Runnable refocus;
+    private void focusAt(PreviewView preview, float x, float y) {
+        if (camera == null) return;
+        try {
+            camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
+                new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(x, y))
+                .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS).build());
+        } catch (Throwable ignored) { /* the camera keeps its own focus */ }
     }
 
     private boolean shown;

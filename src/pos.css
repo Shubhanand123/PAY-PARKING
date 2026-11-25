@@ -508,3 +508,7 @@ body.has-update .gh-time { display: none; }
 .q9-over { background: rgb(255 255 255 / 96%); }
 .screen, .content, .stack { -webkit-overflow-scrolling: touch; }
 a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation; }
+
+/* Printed slip: big ticket QR on its own line, so the exit gate scanner reads it at once (about 32 mm wide on 58 mm paper). */
+.slip-print .slip-qr-row { flex-direction: column !important; align-items: center !important; text-align: center !important; gap: 8px !important; }
+.slip-print .slip-qr-row .qr-svg, .slip-print .slip-qr-row svg, .slip-print .slip-qr-row img { width: 260px !important; height: 260px !important; }

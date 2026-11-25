@@ -25,9 +25,12 @@ function safeNow(urgent: boolean, tapped = false) {
 }
 
 // ---------- finding a new version ----------
-/** This version's fingerprint: the names of its script and style files (they change with every build). */
-const currentScript = () => [...document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>('script[src*="/assets/"], link[rel="stylesheet"][href*="/assets/"]')]
-  .map(el => ('src' in el && el.src ? el.src : (el as HTMLLinkElement).href).split('/assets/')[1]).sort().join('|')
+/** A version's fingerprint: the names of the script and style files its page lists (they change with every build). */
+const fingerprint = (html: string) => [...new Set([...html.matchAll(/(?:src|href)="[^"]*\/assets\/([^"]+\.(?:js|css))"/g)].map(m => m[1]))].sort().join('|')
+// Taken once, as the page loaded: files the app adds later (the dashboard, sign-in) must not count,
+// or every check would look like a new version and the update would keep coming back.
+const loadedPage = fingerprint(document.head.innerHTML + document.body.innerHTML)
+const currentScript = () => loadedPage
 
 async function latest(): Promise<{ script: string; urgent: boolean } | null> {
   try {
@@ -35,7 +38,7 @@ async function latest(): Promise<{ script: string; urgent: boolean } | null> {
       fetch('./?fresh=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
       fetch('./web-version.json?fresh=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ])
-    const script = [...page.matchAll(/(?:src|href)="[^"]*\/assets\/([^"]+\.(?:js|css))"/g)].map(m => m[1]).sort().join('|')
+    const script = fingerprint(page)
     return script ? { script, urgent: Boolean((info as { urgent?: boolean }).urgent) } : null
   } catch { return null }
 }
