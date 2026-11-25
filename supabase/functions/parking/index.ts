@@ -18,6 +18,7 @@ const headers = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'content-type, x-device-key, authorization',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400', // the browser remembers permission for a day: no extra round trip before each call
   'Cache-Control': 'no-store',
 }
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers })
@@ -246,6 +247,11 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   if (actor && !['owner', 'exit', 'both', 'open'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
   if (actor && (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
   const select = (db: parking.DB) => db.tickets.find(item => actor ? item.id === ticketId : item.token === token)
+  // Fast "paid yet?" check from the gate: ask Razorpay about the open QR first; read the records only once money is there.
+  if (action === 'check-payment' && actor && typeof payload.qr_id === 'string' && razorpayQrId.test(payload.qr_id) && Number.isSafeInteger(payload.amount) && (payload.amount as number) > 0) {
+    const found = await capturedQrPayment(razorpay, payload.qr_id, payload.amount as number).catch(() => undefined)
+    if (!found) return reply({ error: 'Razorpay has not confirmed a captured payment yet. Check again before paying or collecting cash.' }, 409)
+  }
   const initial = await state()
   const ticket = select(initial.db)
   if (!ticket) return reply({ error: 'Ticket not found.' }, actor ? 404 : 401)

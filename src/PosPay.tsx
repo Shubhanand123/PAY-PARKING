@@ -88,7 +88,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
     let live = true
     const i = setInterval(async () => {
       if (busyRef.current) return
-      try { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id }); if (live) onRevision(r.revision) } catch { /* not paid yet */ }
+      try { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id, ...(t.onlineCheckout ? { qr_id: t.onlineCheckout.orderId, amount: t.onlineCheckout.amount } : {}) }); if (live) onRevision(r.revision) } catch { /* not paid yet */ }
     }, 1500)
     return () => { live = false; clearInterval(i) }
   }, [code, paid, t.id, onRevision])
@@ -102,7 +102,7 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
     return () => clearTimeout(i)
   }, [paid]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const check = () => run(async () => { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id }); onRevision(r.revision) })
+  const check = () => run(async () => { const r = await callParkingPayment<PaymentStatus>('check-payment', { ticket_id: t.id, ...(t.onlineCheckout ? { qr_id: t.onlineCheckout.orderId, amount: t.onlineCheckout.amount } : {}) }); onRevision(r.revision) })
   const close = () => run(async () => { const r = await callParkingPayment<{ revision: number }>('switch-to-cash', { ticket_id: t.id }); onRevision(r.revision); return true })
   const cancelQr = async () => { if (!code) { onCash(); return } if (await close()) onCash() }
   const remake = async () => { if (await close()) { setCode(null); await create() } }
