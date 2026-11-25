@@ -8,11 +8,33 @@ import { nativeApp, PlateReader } from './native'
 
 const DOTS = 384 // 58 mm thermal roll at 203 dpi
 
+// Getting ready to print is the slow part (loading the drawing code and turning the Inter font into data).
+// It is done once, in the background when the app opens, so the first slip starts printing straight away.
+let fonts: Promise<string> | undefined
+const drawer = () => import('html-to-image')
+function fontCss(node: HTMLElement) {
+  fonts ??= drawer().then(m => m.getFontEmbedCSS(node)).catch(() => { fonts = undefined; return '' })
+  return fonts
+}
+/** Call when the app opens: prepares printing in the background. */
+export function warmPrinter() {
+  const run = () => {
+    const probe = document.createElement('div')
+    probe.className = 'slip slip-print'
+    probe.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + DOTS + 'px'
+    probe.innerHTML = '<b class="slip-h">PARKER</b><div class="slip-row"><span>Ticket</span><b>T-000000</b></div>'
+    document.body.append(probe)
+    void fontCss(probe).finally(() => probe.remove())
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 3000 }); else setTimeout(run, 1500)
+}
+
 /** Draws the on-screen slip as a black-on-white picture exactly 384 dots wide. */
 export async function slipImage(): Promise<string | undefined> {
-  const slip = document.querySelector<HTMLElement>('.slip')
+  let slip = document.querySelector<HTMLElement>('.slip')
+  for (let i = 0; !slip && i < 10; i++) { await new Promise(r => setTimeout(r, 30)); slip = document.querySelector<HTMLElement>('.slip') }
   if (!slip) return undefined
-  const { toCanvas } = await import('html-to-image')
+  const { toCanvas } = await drawer()
   // Print a copy laid out at the paper's width, so it looks the same on every screen size.
   const holder = document.createElement('div')
   holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + DOTS + 'px;background:#fff;z-index:-1'
@@ -24,7 +46,8 @@ export async function slipImage(): Promise<string | undefined> {
   document.body.append(holder)
   try {
     await document.fonts?.ready
-    const canvas = await toCanvas(copy, { pixelRatio: 1, backgroundColor: '#ffffff', width: DOTS, cacheBust: false })
+    const fontEmbedCSS = await fontCss(copy)
+    const canvas = await toCanvas(copy, { pixelRatio: 1, backgroundColor: '#ffffff', width: DOTS, cacheBust: false, fontEmbedCSS })
     // Thermal printers have no grey: make every dot pure black or white so text stays crisp.
     const ctx = canvas.getContext('2d')!
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -39,7 +62,7 @@ export async function slipImage(): Promise<string | undefined> {
 
 let builtIn: boolean | undefined
 export async function printSlip() {
-  await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 150))) // let the slip render first
+  await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))) // let the slip render first
   if (nativeApp) {
     if (builtIn !== false) {
       try {

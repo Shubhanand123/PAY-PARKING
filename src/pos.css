@@ -495,3 +495,8 @@ body.has-update .gh-time { display: none; }
 .slip-print .slip-qr-row { font-size: 16px !important; line-height: 1.45 !important; color: #000 !important; margin-top: 14px !important; }
 .slip-print .slip-qr-row .qr-svg { width: 150px !important; height: 150px !important; }
 .slip-print .slip-free { border: 2px dashed #000 !important; padding: 10px !important; }
+.slip-print .slip-row { padding: 5px 0 !important; }
+.slip-print .slip-foot { font-size: 17px !important; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 2px dashed #000; color: #000; }
+
+/* Closing lines at the bottom of the slip and receipt */
+.slip-foot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #888; text-align: center; font-size: 11px; line-height: 1.45; }

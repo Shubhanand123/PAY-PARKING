@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { callParking } from './parking-api'
-import { auth, indianMobile } from './parking-auth'
+import { indianMobile, loadAuth } from './parking-auth'
 import { loginAlias, pairedPassword } from './parking-identity'
 
 type Step = 'credential' | 'recovery' | 'owner-setup'
@@ -84,6 +84,7 @@ export function Login({ onOwnerSetup, error }: {
         setNotice(t.saved)
         return
       }
+      const auth = await loadAuth()
       if (!auth) throw new Error(t.unavailable)
       const deviceKey = localStorage.getItem(deviceKeyName(mobile))
       if (!deviceKey) throw new Error(t.newDevice)

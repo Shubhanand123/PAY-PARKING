@@ -24,29 +24,32 @@ import { alreadyInside, ticketCancelled } from './fx'
 function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
   const tv = db.tariffs.find(x => x.id === t.tariffId)
   const rt = tv?.rates[t.category]
-  const rates = tv && rt ? { v: tv.version, text: `${rupees(rt.firstPaise)} first ${rt.firstHours}h, ${rupees(rt.perHourPaise)} per started hour, ${tv.graceMin} min free${rt.capPaise ? `, max ${rupees(rt.capPaise)} / 24h` : ''}` } : null
+  const paidBy = (p: Receipt['payments'][number]) => p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid by UPI' : 'Paid in cash'
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
       <b className="slip-h">{r.operator}</b>
       <div>{r.siteName}</div>
-      <div className="slip-s">{r.address} · {r.phone}</div>
+      <div className="slip-s">{r.address}</div>
+      <div className="slip-s">Ph: {r.phone}</div>
       {r.gstin && <div className="slip-s">GSTIN: {r.gstin}</div>}
       <hr />
-      <div className="slip-big">{r.free ? 'RECEIPT · FREE' : 'RECEIPT'}</div>
-      <div className="slip-row"><span>Receipt</span><b>{r.receiptNo}</b></div>
-      <div className="slip-row"><span>Ticket</span><b>{r.ticketId}</b></div>
+      <div className="slip-big">{r.free ? 'RECEIPT · FREE' : 'PAYMENT RECEIPT'}</div>
       <div className="slip-plate"><i>IND</i>{prettyPlate(r.plate)}</div>
+      <div className="slip-row"><span>Receipt No.</span><b>{r.receiptNo}</b></div>
+      <div className="slip-row"><span>Ticket No.</span><b>{r.ticketId}</b></div>
       <div className="slip-row"><span>Vehicle</span><b>{r.vehicle}</b></div>
-      <div className="slip-row"><span>Entry</span><b>{fmtDT(r.entryAt)}</b></div>
-      <div className="slip-row"><span>Billed</span><b>{fmtDT(r.billedAt)}</b></div>
-      <div className="slip-row"><span>Stay</span><b>{dur(r.minutes * 60000)}</b></div>
+      <hr />
+      <div className="slip-row"><span>Time in</span><b>{fmtDT(r.entryAt)}</b></div>
+      <div className="slip-row"><span>Time out</span><b>{fmtDT(r.billedAt)}</b></div>
+      <div className="slip-row"><span>Total stay</span><b>{dur(r.minutes * 60000)}</b></div>
       <hr />
       {r.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{l.paise < 0 ? '− ' + rupees(-l.paise) : rupees(l.paise)}</b></div>)}
       <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(r.totalPaise)}</b></div>
-      {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{p.kind === 'prepaid' ? 'Paid at entry' : p.method === 'razorpay' ? 'Paid by UPI (Razorpay)' : 'Cash paid'}</span><b>{rupees(p.amountPaise)}</b></div>)}
+      {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{paidBy(p)}</span><b>{rupees(p.amountPaise)}</b></div>)}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{rates ? `Rates v${rates.v}: ${rates.text}. ` : ''}Thank you · Issued by {r.issuedBy}</span></div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
+      <div className="slip-foot"><b>Thank you for parking with us!</b><br />Drive safe · Issued by {r.issuedBy}</div>
     </div>
   )
 }
@@ -63,36 +66,41 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
       <div className="slip-sim">58 mm</div>
       <b className="slip-h">{db.settings.operator}</b>
       <div>{db.settings.siteName}</div>
-      <div className="slip-s">{db.settings.address} · {db.settings.phone}</div>
+      <div className="slip-s">{db.settings.address}</div>
+      <div className="slip-s">Ph: {db.settings.phone}</div>
       {db.settings.gstin && <div className="slip-s">GSTIN: {db.settings.gstin}</div>}
       <hr />
-      <div className="slip-big">{receipt ? 'RECEIPT' : 'PARKING SLIP'}</div>
-      <div className="slip-row"><span>Ticket</span><b>{t.id}</b></div>
-      {receipt && pays.length > 0 && <div className="slip-row"><span>Receipt</span><b>{pays[pays.length - 1].receiptNo}</b></div>}
+      <div className="slip-big">{receipt ? 'PAYMENT RECEIPT' : 'PARKING SLIP'}</div>
       <div className="slip-plate"><i>IND</i>{prettyPlate(t.plate)}</div>
+      <div className="slip-row"><span>Ticket No.</span><b>{t.id}</b></div>
+      {receipt && pays.length > 0 && <div className="slip-row"><span>Receipt No.</span><b>{pays[pays.length - 1].receiptNo}</b></div>}
       <div className="slip-row"><span>Vehicle</span><b>{cat?.name}</b></div>
-      <div className="slip-row"><span>Entry</span><b>{fmtDT(t.entryAt)}</b></div>
       <div className="slip-row"><span>Gate</span><b>{t.entryGate}</b></div>
-      {receipt && t.exitAt && <div className="slip-row"><span>Exit</span><b>{fmtDT(t.exitAt)}</b></div>}
+      <hr />
+      <div className="slip-row"><span>Date</span><b>{fmtDate(t.entryAt)}</b></div>
+      <div className="slip-row"><span>Time in</span><b>{fmtTime(t.entryAt)}</b></div>
+      {receipt && t.exitAt && <div className="slip-row"><span>Time out</span><b>{fmtDT(t.exitAt)}</b></div>}
       {receipt && b && <>
-        <div className="slip-row"><span>Stay</span><b>{dur(b.minutes * 60000)}</b></div>
+        <div className="slip-row"><span>Total stay</span><b>{dur(b.minutes * 60000)}</b></div>
         <hr />
         {b.lines.map((l, i) => <div key={i} className="slip-row"><span>{l.label}</span><b>{rupees(l.paise)}</b></div>)}
         <div className="slip-row slip-tot"><span>TOTAL</span><b>{rupees(t.totalPaise ?? b.totalPaise)}</b></div>
-        {pays.map(payment => <div key={payment.id} className="slip-row"><span>{payment.method === 'razorpay' ? 'Razorpay' : 'Cash paid'}</span><b>{rupees(payment.amountPaise)}</b></div>)}
+        {pays.map(payment => <div key={payment.id} className="slip-row"><span>{payment.method === 'razorpay' ? 'Paid by UPI' : 'Paid in cash'}</span><b>{rupees(payment.amountPaise)}</b></div>)}
       </>}
       {!receipt && <>
         {t.prepaidHours > 0 && <div className="slip-row"><span>Prepaid</span><b>{t.prepaidHours}h · {rupees(pays[0]?.amountPaise ?? 0)}</b></div>}
         <hr />
         <div className="slip-rules">
-          <b>Rates (v{tv.version}, fixed for this ticket)</b><br />
-          First {r.firstHours}h {rupees(r.firstPaise)} · then {rupees(r.perHourPaise)} per started hour ·
-          Free if you leave within {tv.graceMin} min{r.capPaise ? ` · Max ${rupees(r.capPaise)} per 24h` : ''}.
-          {t.prepaidHours > 0 && ' Prepaid time is not refunded; extra time is charged at exit.'}
-          {' '}Final amount is worked out at exit.
+          <b>PARKING CHARGES</b><br />
+          {rupees(r.firstPaise)} for the first {r.firstHours} {r.firstHours === 1 ? 'hour' : 'hours'}<br />
+          Then {rupees(r.perHourPaise)} per hour (or part)<br />
+          Free if you leave within {tv.graceMin} min
+          {r.capPaise ? <><br />Max {rupees(r.capPaise)} per 24 hours</> : null}
+          {t.prepaidHours > 0 && <><br />Prepaid time is not refunded; extra time is charged at exit.</>}
         </div>
       </>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see your ticket, time and amount. Keep this slip for the exit.</span></div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to check your time and amount to pay.</span></div>
+      {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Show it at the exit gate.<br />Thank you · Drive safe</div>}
     </div>
   )
 }

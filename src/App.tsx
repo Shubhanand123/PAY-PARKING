@@ -1,13 +1,14 @@
-import { auth } from './parking-auth'
+import { authEnabled, onSession, signOutLocal } from './parking-auth'
 import { Login } from './Login'
 import { apiEnabled, callParking, currentSnapshot, deviceKey, isOfflineError, openAccess, outbox, ParkingApiError, setDeviceKey, syncOutbox, type Snapshot } from './parking-api'
 import { nativeApp, PlateReader } from './native'
 import { fmtTime, type DB } from './engine'
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useDB, useNow, Ico, Toast } from './ui'
 import { Entry, Exit, Customer } from './Gate'
 import { PlateScanner } from './PlateScanner'
-import { Owner } from './Owner'
+// The Owner dashboard loads only when it is opened, so the gate screens start faster.
+const Owner = lazy(() => import('./Owner').then(m => ({ default: m.Owner })))
 
 type View = 'entry' | 'exit' | 'owner'
 const route = () => location.hash.replace(/^#\/?/, '')
@@ -19,7 +20,7 @@ function openDirectPos(link: string) {
   const request = (kind === 'pair-pos'
     ? callParking<{ key: string }>('pairPosDevice', [code], '').then(({ result }) => result.key)
     : callParking('posSnapshot', [], code).then(() => code)).then(async key => {
-    await auth?.auth.signOut({ scope: 'local' })
+    await signOutLocal()
     setDeviceKey(key)
   })
   pairing = { code: link, request }
@@ -39,7 +40,7 @@ function OpenApp() {
   const appLocked = () => nativeApp && !deviceKey()
   const [snapshot, setSnapshot] = useState<Snapshot | undefined>(() => { const s = currentSnapshot(); return s?.role === 'owner' || appLocked() ? undefined : s })
   const [customer, setCustomer] = useState<DB>()
-  const [sessionId, setSessionId] = useState<string | null | undefined>(auth ? undefined : null)
+  const [sessionId, setSessionId] = useState<string | null | undefined>(authEnabled ? undefined : null)
   const [error, setError] = useState('')
   const [r, setR] = useState(route())
   useEffect(() => {
@@ -50,9 +51,7 @@ function OpenApp() {
     return () => { removeEventListener('hashchange', changed); removeEventListener('parking-snapshot', updated) }
   }, [])
   useEffect(() => {
-    if (!auth) return
-    const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => setSessionId(session?.user.id ?? null))
-    return () => subscription.unsubscribe()
+    return onSession(setSessionId)
   }, [])
   const [setupNeeded, setSetupNeeded] = useState(appLocked)
   useEffect(() => {
@@ -74,7 +73,7 @@ function OpenApp() {
       } catch (failure) {
         if (!active) return
         // An expired or replaced Owner session: drop it and fall back to the open gate view.
-        if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await auth?.auth.signOut({ scope: 'local' })
+        if (sessionId && failure instanceof ParkingApiError && failure.status === 401) await signOutLocal()
         if (failure instanceof ParkingApiError && failure.status === 403 && /not set up/i.test(failure.message)) { setSetupNeeded(true); setSnapshot(undefined) }
         if (failure instanceof ParkingApiError && failure.status === 401 && deviceKey()) { setDeviceKey(''); setSetupNeeded(true); setSnapshot(undefined) } // POS removed in the dashboard
         setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
@@ -98,7 +97,7 @@ function OpenApp() {
   }
   async function signOut() {
     setDeviceKey('')
-    await auth?.auth.signOut({ scope: 'local' })
+    await signOutLocal()
     setSnapshot(undefined)
     location.hash = '/entry'
   }
@@ -135,11 +134,7 @@ function ConnectedApp() {
   }, [])
 
   useEffect(() => {
-    if (!auth) { setSessionId(null); return }
-    const { data: { subscription } } = auth.auth.onAuthStateChange((_event, session) => {
-      setSessionId(session?.user.id ?? null)
-    })
-    return () => subscription.unsubscribe()
+    return onSession(setSessionId)
   }, [])
 
   useEffect(() => {
@@ -165,7 +160,7 @@ function ConnectedApp() {
         if (!active) return
         if (!r.startsWith('t/') && failure instanceof ParkingApiError && (failure.status === 401 || failure.status === 403)) {
           setSnapshot(undefined)
-          if (sessionId) await auth?.auth.signOut({ scope: 'local' })
+          if (sessionId) await signOutLocal()
           else setDeviceKey('')
         }
         setError(isOfflineError(failure) ? 'offline' : (failure as Error).message)
@@ -195,7 +190,7 @@ function ConnectedApp() {
     if (!sessionId) setDeviceKey('')
     setSnapshot(undefined)
     setError('')
-    await auth?.auth.signOut({ scope: 'local' })
+    await signOutLocal()
     location.hash = snapshot?.role === 'owner' ? '/owner' : ''
   }
 
@@ -263,7 +258,7 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
       <main className="content">
         {view === 'entry' && <Entry db={db} me={me} toast={say} onFlow={setFlow} />}
         {view === 'exit' && <Exit db={db} me={me} toast={say} onFlow={setFlow} />}
-        {view === 'owner' && <Owner db={db} me={me} toast={say} />}
+        {view === 'owner' && <Suspense fallback={<p className="muted" style={{ padding: 24 }}>Opening the dashboard…</p>}><Owner db={db} me={me} toast={say} /></Suspense>}
       </main>
       {toast && <Toast msg={toast.m} tone={toast.bad ? 'bad' : 'ok'} onDone={done} />}
     </div>

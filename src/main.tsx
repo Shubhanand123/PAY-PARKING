@@ -12,8 +12,12 @@ import './pos.css'
 import App from './App'
 import { AppUpdate } from './AppUpdate'
 import { UpdateBar } from './updater'
+import { warmPrinter } from './print'
+import { nativeApp } from './native'
 createRoot(document.getElementById('root')!).render(<StrictMode><AppUpdate /><UpdateBar /><App /></StrictMode>)
 // Offline copy of the app (public/sw.js): opens instantly and works with no internet. Website builds only.
 if (import.meta.env.PROD && 'serviceWorker' in navigator && location.protocol === 'https:' && !location.hostname.startsWith('localhost')) {
   addEventListener('load', () => { void navigator.serviceWorker.register('./sw.js').catch(() => {}) })
 }
+
+if (nativeApp) warmPrinter() // the POS prints its own slips: get that ready in the background
