@@ -33,6 +33,11 @@ import com.getcapacitor.annotation.PermissionCallback;
 @CapacitorPlugin(name = "PlateReader", permissions = { @Permission(strings = { Manifest.permission.CAMERA }, alias = "camera") })
 public class PlateReaderPlugin extends Plugin {
 
+    @Override
+    public void load() {
+        PlateScanActivity.warmUp(getContext()); // load the camera and text reader early: the first scan opens fast
+    }
+
     @PluginMethod
     public void scan(PluginCall call) {
         if (getPermissionState("camera") != PermissionState.GRANTED) {

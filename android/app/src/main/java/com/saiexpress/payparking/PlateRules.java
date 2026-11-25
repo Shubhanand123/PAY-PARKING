@@ -51,6 +51,19 @@ final class PlateRules {
         return new String(a);
     }
 
+    /** The plate exactly as read (only spaces and the IND mark removed), or null if that is not a valid plate. */
+    static String directFromLines(List<String> rawLines) {
+        List<String> lines = new ArrayList<>();
+        for (String raw : rawLines) {
+            String line = norm(raw.toUpperCase(Locale.ROOT).replaceFirst("^\\s*IND(\\s+|$)", ""));
+            if (!line.isEmpty()) lines.add(line);
+        }
+        List<String> possible = new ArrayList<>(lines);
+        for (int i = 0; i + 1 < lines.size(); i++) possible.add(lines.get(i) + lines.get(i + 1));
+        for (String p : possible) if (valid(p)) return p;
+        return null;
+    }
+
     /** Lines of text from one block (top to bottom). Returns a valid plate, or null. */
     static String fromLines(List<String> rawLines) {
         List<String> lines = new ArrayList<>();

@@ -2,7 +2,9 @@ package com.saiexpress.payparking;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.media.Image;
@@ -23,6 +25,8 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
@@ -74,11 +78,35 @@ public class PlateScanActivity extends AppCompatActivity {
     private boolean torchOn, finished;
     private long lastSeen;
 
+    // The text and QR readers are made once and kept, so the second scan onwards starts instantly.
+    private static TextRecognizer sharedText;
+    private static BarcodeScanner sharedQr;
+    static synchronized TextRecognizer textReader() {
+        if (sharedText == null) sharedText = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        return sharedText;
+    }
+    static synchronized BarcodeScanner qrReader() {
+        if (sharedQr == null) sharedQr = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build());
+        return sharedQr;
+    }
+    /** Loads the readers' models in the background when the app starts, so the first scan is fast too. */
+    static void warmUp(android.content.Context context) {
+        new Thread(() -> {
+            try {
+                Bitmap tiny = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888);
+                InputImage img = InputImage.fromBitmap(tiny, 0);
+                Tasks.await(textReader().process(img));
+                Tasks.await(qrReader().process(img));
+                ProcessCameraProvider.getInstance(context.getApplicationContext());
+            } catch (Throwable ignored) { /* warming is only a speed-up */ }
+        }).start();
+    }
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         boolean readsQr = getIntent().getBooleanExtra(EXTRA_QR, false);
-        text = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
-        if (readsQr) qr = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build());
+        text = textReader();
+        if (readsQr) qr = qrReader();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -133,53 +161,79 @@ public class PlateScanActivity extends AppCompatActivity {
                 ImageAnalysis frames = new ImageAnalysis.Builder()
                     .setResolutionSelector(resolution)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .build();
                 frames.setAnalyzer(analysis, this::analyze);
                 provider.unbindAll();
                 camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, use, frames);
                 if (camera.getCameraInfo().hasFlashUnit()) light.setVisibility(View.VISIBLE);
+                // Focus and expose for the middle of the picture, where the plate is.
+                try {
+                    camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
+                        new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)).disableAutoCancel().build());
+                } catch (Throwable ignored) { /* the camera keeps its own focus */ }
             } catch (Exception e) {
                 status.setText("The camera could not start. Tap Type manually.");
             }
         }, getMainExecutor());
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
+    /** The band of the picture that is read for text: the middle half, where the on-screen frame is. Reading less is faster. */
+    private static final float BAND_TOP = 0.25f, BAND_BOTTOM = 0.75f;
+
     private void analyze(ImageProxy frame) {
-        Image media = frame.getImage();
-        if (media == null || finished) { frame.close(); return; }
-        int rotation = frame.getImageInfo().getRotationDegrees();
-        InputImage image = InputImage.fromMediaImage(media, rotation);
-        boolean sideways = rotation == 90 || rotation == 270;
-        int width = sideways ? frame.getHeight() : frame.getWidth(), height = sideways ? frame.getWidth() : frame.getHeight();
-        Task<Text> reading = text.process(image);
-        Task<List<Barcode>> codes = qr != null ? qr.process(image) : Tasks.forResult(Collections.emptyList());
-        Tasks.whenAllComplete(reading, codes).addOnCompleteListener(main::post, done -> {
-            try {
-                if (finished) return;
-                if (codes.isSuccessful()) for (Barcode code : codes.getResult()) {
-                    if (code.getRawValue() != null) { finishWith(null, null, code.getRawValue()); return; }
-                }
-                if (reading.isSuccessful()) onText(reading.getResult(), width, height);
-            } finally {
-                frame.close();
+        if (finished) { frame.close(); return; }
+        Bitmap upright;
+        try {
+            Bitmap raw = frame.toBitmap();
+            int rotation = frame.getImageInfo().getRotationDegrees();
+            if (rotation != 0) {
+                Matrix m = new Matrix(); m.postRotate(rotation);
+                upright = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, false);
+            } else upright = raw;
+        } catch (Throwable e) {
+            frame.close(); return;
+        }
+        frame.close(); // free the camera straight away for the next picture
+        int top = Math.round(upright.getHeight() * BAND_TOP), bandH = Math.round(upright.getHeight() * (BAND_BOTTOM - BAND_TOP));
+        Bitmap band = Bitmap.createBitmap(upright, 0, top, upright.getWidth(), bandH);
+        int width = band.getWidth(), height = band.getHeight();
+        Task<Text> reading = text.process(InputImage.fromBitmap(band, 0));
+        Task<List<Barcode>> codes = qr != null ? qr.process(InputImage.fromBitmap(upright, 0)) : Tasks.forResult(Collections.emptyList());
+        try { Tasks.await(Tasks.whenAllComplete(reading, codes)); } catch (Exception ignored) { /* handled below */ }
+        main.post(() -> {
+            if (finished) return;
+            if (codes.isSuccessful()) for (Barcode code : codes.getResult()) {
+                if (code.getRawValue() != null) { finishWith(null, null, code.getRawValue()); return; }
             }
+            if (reading.isSuccessful()) onText(reading.getResult(), width, height);
         });
     }
 
     /** Keeps the valid plate nearest the middle of the frame, then votes across recent frames. */
     private void onText(Text result, int width, int height) {
         String best = null;
+        boolean bestClear = false;
         double bestDistance = Double.MAX_VALUE;
         for (Text.TextBlock block : result.getTextBlocks()) {
             List<String> lines = new ArrayList<>();
-            for (Text.Line line : block.getLines()) lines.add(line.getText());
+            float confidence = 1f;
+            for (Text.Line line : block.getLines()) { lines.add(line.getText()); confidence = Math.min(confidence, line.getConfidence()); }
             String plate = PlateRules.fromLines(lines);
             Rect box = block.getBoundingBox();
             if (plate == null || box == null) continue;
             double dx = box.exactCenterX() / width - 0.5, dy = box.exactCenterY() / height - 0.5;
             double distance = dx * dx + dy * dy;
-            if (distance < bestDistance) { bestDistance = distance; best = plate; }
+            if (distance < bestDistance) {
+                bestDistance = distance; best = plate;
+                // Read cleanly in one go: valid as read (no look-alike fixes) and the reader is sure of every letter.
+                bestClear = confidence >= 0.85f && plate.equals(PlateRules.directFromLines(lines));
+            }
+        }
+        final String clear = best;
+        if (clear != null && bestClear && recent.stream().noneMatch(p -> !p.isEmpty() && !p.equals(clear))) {
+            finishWith(clear, new ArrayList<>(), null); // one clear frame is enough: no waiting for a second
+            return;
         }
         recent.addLast(best == null ? "" : best);
         while (recent.size() > 5) recent.removeFirst();
@@ -222,7 +276,7 @@ public class PlateScanActivity extends AppCompatActivity {
         setResult(RESULT_OK, data);
         overlay.setState(ScanOverlay.State.DONE, pretty(plate));
         status.setText("Got it");
-        main.postDelayed(this::finish, 650); // a short "got it" moment, then back to the form
+        main.postDelayed(this::finish, 300); // a short "got it" moment, then back to the form
     }
 
     private void cancel() {
@@ -239,9 +293,7 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
-        analysis.shutdown();
-        text.close();
-        if (qr != null) qr.close();
+        analysis.shutdown(); // the shared readers stay loaded for the next scan
         super.onDestroy();
     }
 
