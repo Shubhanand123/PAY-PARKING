@@ -661,7 +661,7 @@ Deno.serve(async request => {
       if (!['entry', 'both', 'owner', 'open'].includes(role)) return reply({ error: 'This device cannot save scans.' }, 403)
       const [ticketId, read, image] = args
       if (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId) || typeof read !== 'string' || !/^[A-Z0-9]{0,20}$/.test(read)
-        || typeof image !== 'string' || image.length > 200_000 || !/^[A-Za-z0-9+/=]+$/.test(image)) return reply({ error: 'Invalid scan.' }, 400)
+        || typeof image !== 'string' || image.length > 90_000 || !/^[A-Za-z0-9+/=]+$/.test(image)) return reply({ error: 'Invalid scan.' }, 400)
       const bytes = Uint8Array.from(atob(image), c => c.charCodeAt(0))
       if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return reply({ error: 'The scan picture must be a JPEG.' }, 400)
       const ticket = (await state()).db.tickets.find(t => t.id === ticketId)

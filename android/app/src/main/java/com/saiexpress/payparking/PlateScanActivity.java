@@ -67,14 +67,14 @@ public class PlateScanActivity extends AppCompatActivity {
     static final String RESULT_PLATE = "plate", RESULT_ALTERNATIVES = "alternatives", RESULT_QR = "qr", RESULT_PICTURE = "picture";
     private volatile Bitmap lastPicture;
 
-    /** The plate picture as a small JPEG (at most 320 px wide, ~10-20 KB), base64. Saved with the entry for training. */
+    /** The plate picture as a very small JPEG (at most 256 px wide, quality 60: about 3-8 KB), base64. Saved for training. */
     static String smallJpeg(Bitmap b) {
         if (b == null) return null;
         try {
-            Bitmap s = b.getWidth() > 320 ? Bitmap.createScaledBitmap(b, 320, Math.max(1, Math.round(b.getHeight() * 320f / b.getWidth())), true) : b;
+            Bitmap s = b.getWidth() > 256 ? Bitmap.createScaledBitmap(b, 256, Math.max(1, Math.round(b.getHeight() * 256f / b.getWidth())), true) : b;
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            s.compress(Bitmap.CompressFormat.JPEG, 75, out);
-            return out.size() < 140_000 ? android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP) : null;
+            s.compress(Bitmap.CompressFormat.JPEG, 60, out);
+            return out.size() < 60_000 ? android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP) : null;
         } catch (Throwable e) { return null; }
     }
 
