@@ -213,36 +213,58 @@ public class PlateScanActivity extends AppCompatActivity {
     /** The band of the picture that is read for text: the middle half, where the on-screen frame is. Reading less is faster. */
     private static final float BAND_TOP = 0.16f, BAND_BOTTOM = 0.84f; // generous: the plate is caught even when not centred
 
+    // Frames are handled as fast as the plate finder runs. ML Kit (slow) works on one frame at a time in the
+    // background; while it is busy, newer frames still go through the finder and the Indian reader.
+    private final java.util.concurrent.atomic.AtomicBoolean mlKitBusy = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private volatile int framesSeen;
+
+    /** A rectangle in the upright picture, as the same rectangle in the camera's raw (not yet rotated) picture. */
+    private static Rect toRaw(Rect u, int rotation, int rawW, int rawH) {
+        switch (rotation) {
+            case 90: return new Rect(u.top, rawH - u.right, u.bottom, rawH - u.left);
+            case 180: return new Rect(rawW - u.right, rawH - u.bottom, rawW - u.left, rawH - u.top);
+            case 270: return new Rect(rawW - u.bottom, u.left, rawW - u.top, u.right);
+            default: return new Rect(u);
+        }
+    }
+
+    /** Cuts the upright rectangle out of the raw picture and turns only that small piece upright. */
+    private static Bitmap cutUpright(Bitmap raw, Rect upright, int rotation) {
+        Rect r = toRaw(upright, rotation, raw.getWidth(), raw.getHeight());
+        r.intersect(0, 0, raw.getWidth(), raw.getHeight());
+        if (r.width() < 2 || r.height() < 2) return null;
+        Matrix m = new Matrix(); m.postRotate(rotation);
+        return Bitmap.createBitmap(raw, r.left, r.top, r.width(), r.height(), m, true);
+    }
+
     private void analyze(ImageProxy frame) {
         if (finished) { frame.close(); return; }
-        Bitmap upright;
+        Bitmap raw;
+        int rotation;
         try {
-            Bitmap raw = frame.toBitmap();
-            int rotation = frame.getImageInfo().getRotationDegrees();
-            if (rotation != 0) {
-                Matrix m = new Matrix(); m.postRotate(rotation);
-                upright = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, false);
-            } else upright = raw;
+            raw = frame.toBitmap();
+            rotation = frame.getImageInfo().getRotationDegrees();
         } catch (Throwable e) {
             frame.close(); return;
         }
         frame.close(); // free the camera straight away for the next picture
-        // 1. The plate finder boxes the plate (tens of ms); 2. the text reader reads only that box.
-        // No box found: read the middle band of the picture, as before.
+        framesSeen++;
+        boolean sideways = rotation == 90 || rotation == 270;
+        int uw = sideways ? raw.getHeight() : raw.getWidth(), uh = sideways ? raw.getWidth() : raw.getHeight();
+        // 1. The plate finder boxes the plate; 2. only that box is turned upright and read.
         Bitmap band = null;
         long t0 = System.nanoTime();
         PlateFinder finder = PlateFinder.ready(); // not loaded yet: read the old way for these first frames
         if (finder != null) {
             try {
-                android.graphics.Rect box = finder.find(upright);
+                Rect box = finder.find(raw, rotation);
                 if (box != null) {
                     int mx = Math.round(box.width() * 0.12f), my = Math.round(box.height() * 0.35f);
-                    int x1 = Math.max(0, box.left - mx), y1 = Math.max(0, box.top - my);
-                    int x2 = Math.min(upright.getWidth(), box.right + mx), y2 = Math.min(upright.getHeight(), box.bottom + my);
-                    if (x2 - x1 > 16 && y2 - y1 > 8) {
-                        band = Bitmap.createBitmap(upright, x1, y1, x2 - x1, y2 - y1);
+                    Rect grown = new Rect(Math.max(0, box.left - mx), Math.max(0, box.top - my), Math.min(uw, box.right + mx), Math.min(uh, box.bottom + my));
+                    if (grown.width() > 16 && grown.height() > 8) {
+                        band = cutUpright(raw, grown, rotation);
                         // Small, far-away plates: enlarge so every letter has enough pixels to read.
-                        if (band.getHeight() < 96) {
+                        if (band != null && band.getHeight() < 96) {
                             float k = 96f / band.getHeight();
                             band = Bitmap.createScaledBitmap(band, Math.round(band.getWidth() * k), 96, true);
                         }
@@ -252,42 +274,39 @@ public class PlateScanActivity extends AppCompatActivity {
         }
         finderMs = (System.nanoTime() - t0) / 1_000_000;
         boolean boxed = band != null;
-        if (band == null) {
-            int top = Math.round(upright.getHeight() * BAND_TOP), bandH = Math.round(upright.getHeight() * (BAND_BOTTOM - BAND_TOP));
-            band = Bitmap.createBitmap(upright, 0, top, upright.getWidth(), bandH);
-        }
-        // Our Indian plate reader on the plate box (about 10 ms). A sure reading of a valid plate is taken at once;
-        // anything less sure goes to ML Kit as before.
+        // Our Indian plate reader on the plate box (a few ms). A sure reading of a valid plate is taken at once.
         PlateTextReader ours = boxed ? PlateTextReader.ready() : null;
         if (ours != null) {
             try {
                 long tr = System.nanoTime();
                 PlateTextReader.Reading rd = ours.read(band);
-                readerMs = (System.nanoTime() - tr) / 1_000_000;
+                long took = (System.nanoTime() - tr) / 1_000_000;
                 String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
                 if (plate != null && rd.confidence >= 0.95f) { // 95%: right 99-100% of the time on unseen Indian plates
                     final Bitmap seen = band;
-                    lastBoxed = true; ownReader = true;
-                    main.post(() -> { if (!finished) { lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });
+                    main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });
                     return;
                 }
-            } catch (Throwable ignored) { /* fall back to ML Kit */ }
+            } catch (Throwable ignored) { /* ML Kit below */ }
         }
-        ownReader = false;
-        int width = band.getWidth(), height = band.getHeight();
-        final boolean usedFinder = boxed;
-        long t1 = System.nanoTime();
-        Task<Text> reading = text.process(InputImage.fromBitmap(band, 0));
-        Task<List<Barcode>> codes = qr != null ? qr.process(InputImage.fromBitmap(upright, 0)) : Tasks.forResult(Collections.emptyList());
-        try { Tasks.await(Tasks.whenAllComplete(reading, codes)); } catch (Exception ignored) { /* handled below */ }
-        readerMs = (System.nanoTime() - t1) / 1_000_000;
-        lastBoxed = usedFinder;
+        // ML Kit (and the ticket QR on the exit gate): only if it is not still busy with an earlier frame.
+        if (!mlKitBusy.compareAndSet(false, true)) return;
+        if (band == null) band = cutUpright(raw, new Rect(0, Math.round(uh * BAND_TOP), uw, Math.round(uh * BAND_BOTTOM)), rotation);
+        if (band == null) { mlKitBusy.set(false); return; }
         final Bitmap readFrom = band;
-        main.post(() -> {
+        final int width = band.getWidth(), height = band.getHeight();
+        final boolean usedFinder = boxed;
+        final long t1 = System.nanoTime();
+        Task<Text> reading = text.process(InputImage.fromBitmap(band, 0));
+        Task<List<Barcode>> codes = qr != null ? qr.process(InputImage.fromBitmap(raw, rotation)) : Tasks.forResult(Collections.emptyList());
+        Tasks.whenAllComplete(reading, codes).addOnCompleteListener(main::post, done -> {
+            mlKitBusy.set(false);
             if (finished) return;
             if (codes.isSuccessful()) for (Barcode code : codes.getResult()) {
                 if (code.getRawValue() != null) { finishWith(null, null, code.getRawValue()); return; }
             }
+            readerMs = (System.nanoTime() - t1) / 1_000_000;
+            lastBoxed = usedFinder; ownReader = false;
             lastPicture = readFrom; // the picture this reading came from (kept for training the plate reader)
             if (reading.isSuccessful()) onText(reading.getResult(), width, height);
         });
@@ -363,7 +382,8 @@ public class PlateScanActivity extends AppCompatActivity {
         // Timing line, so the speed can be checked at the gate.
         PlateFinder f = PlateFinder.ready();
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
-        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
+        float fps = shownAt > 0 ? framesSeen * 1000f / Math.max(1, System.currentTimeMillis() - shownAt) : 0;
+        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
         main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 

@@ -109,14 +109,29 @@ final class PlateFinder {
         }
     }
 
-    /** The plate box nearest the middle of the picture, or null. */
-    synchronized Rect find(Bitmap picture) throws Exception {
-        int w = picture.getWidth(), h = picture.getHeight();
+    /** The plate box nearest the middle of the upright picture, or null. */
+    synchronized Rect find(Bitmap picture) throws Exception { return find(picture, 0); }
+
+    /**
+     * Same, for a raw camera picture that still needs turning by `rotation` degrees: the picture is turned while it is
+     * drawn into the small 256 x 256 board, so the full-size picture never has to be copied upright.
+     * The box is returned in upright-picture pixels.
+     */
+    synchronized Rect find(Bitmap raw, int rotation) throws Exception {
+        boolean sideways = rotation == 90 || rotation == 270;
+        int w = sideways ? raw.getHeight() : raw.getWidth(), h = sideways ? raw.getWidth() : raw.getHeight();
         // Letterbox: keep the shape, pad with grey (as the model was trained).
         float r = Math.min((float) SIZE / w, (float) SIZE / h);
         float nw = w * r, nh = h * r, dx = (SIZE - nw) / 2f, dy = (SIZE - nh) / 2f;
         canvas.drawColor(Color.rgb(114, 114, 114));
-        canvas.drawBitmap(picture, null, new RectF(dx, dy, dx + nw, dy + nh), paint);
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.postRotate(rotation);
+        if (rotation == 90) m.postTranslate(raw.getHeight(), 0);
+        else if (rotation == 180) m.postTranslate(raw.getWidth(), raw.getHeight());
+        else if (rotation == 270) m.postTranslate(0, raw.getWidth());
+        m.postScale(r, r);
+        m.postTranslate(dx, dy);
+        canvas.drawBitmap(raw, m, paint);
         board.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE);
         input.clear();
         float[] data = input.array();
