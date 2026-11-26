@@ -236,7 +236,7 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     /** Cuts the upright rectangle out of the raw picture and turns only that small piece upright. */
-    private Rect lastBox; private long lastBoxAt; private String lastOwn; private long lastOwnAt; private int ownStreak;
+    private Rect lastBox; private long lastBoxAt; private String lastOwn; private long lastOwnAt; private int ownStreak; private volatile boolean straightened;
 
     private static Bitmap cutUpright(Bitmap raw, Rect upright, int rotation) {
         Rect r = toRaw(upright, rotation, raw.getWidth(), raw.getHeight());
@@ -292,19 +292,29 @@ public class PlateScanActivity extends AppCompatActivity {
             try {
                 long tr = System.nanoTime();
                 PlateTextReader.Reading rd = ours.read(band);
-                long took = (System.nanoTime() - tr) / 1_000_000;
+                boolean turned = false;
                 String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
-                // Sure (80%+) at once; or, for side angles and blur, the same plate read in 3 frames in a row (each 65%+).
-                // (A single 65-80% reading is right only about half the time, so one agreeing frame is not enough.)
+                // Not sure yet (often a side angle): straighten the plate (tilt + lean) and read it again; keep the surer reading.
+                if (plate == null || rd.confidence < 0.95f) {
+                    PlateStraightener.Result st = PlateStraightener.straighten(band);
+                    if (st.changed()) {
+                        PlateTextReader.Reading rd2 = ours.read(st.picture);
+                        String plate2 = PlateRules.directFromLines(java.util.Collections.singletonList(rd2.text));
+                        if (plate2 != null && (plate == null || rd2.confidence > rd.confidence)) { rd = rd2; plate = plate2; band = st.picture; turned = true; }
+                    }
+                }
+                long took = (System.nanoTime() - tr) / 1_000_000;
+                // Tested on 163 unseen plates, also warped to side angles: one reading at 95%+ is wrong about 1 time in 100,
+                // so it is taken at once. 80-95% is taken when 2 frames in a row read the same plate (a single one is wrong ~6% at side angles).
                 boolean agreed = false;
-                if (plate != null && rd.confidence >= 0.65f) {
+                if (plate != null && rd.confidence >= 0.80f) {
                     ownStreak = plate.equals(lastOwn) && System.currentTimeMillis() - lastOwnAt < 1500 ? ownStreak + 1 : 1;
                     lastOwn = plate; lastOwnAt = System.currentTimeMillis();
-                    agreed = ownStreak >= 3;
+                    agreed = ownStreak >= 2;
                 }
-                if (plate != null && (rd.confidence >= 0.80f || agreed)) {
-                    final Bitmap seen = band;
-                    main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });
+                if (plate != null && (rd.confidence >= 0.95f || agreed)) {
+                    final Bitmap seen = band; final String got = plate; final boolean wasTurned = turned;
+                    main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; straightened = wasTurned; lastPicture = seen; finishWith(got, new ArrayList<>(), null); } });
                     return;
                 }
             } catch (Throwable ignored) { /* ML Kit below */ }
@@ -403,7 +413,7 @@ public class PlateScanActivity extends AppCompatActivity {
         PlateFinder f = PlateFinder.ready();
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
         float fps = shownAt > 0 ? framesSeen * 1000f / Math.max(1, System.currentTimeMillis() - shownAt) : 0;
-        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
+        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? (straightened ? "Indian reader (straightened) " : "Indian reader ") : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
         main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 
