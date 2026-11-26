@@ -194,7 +194,9 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
     if (busy) return // one tap only
     setBusy(true)
     try {
-      const note = conf !== null && conf < 0.8 ? 'low-confidence scan, operator confirmed' : undefined
+      // How the plate got in: shown in the owner's activity log (Scanned / Scanned, corrected / Typed).
+      const sampleNow = scanSample.current
+      const note = sampleNow ? (normPlate(sampleNow.read) === normPlate(plate) ? 'Scanned' : 'Scanned, corrected by operator') : conf !== null ? 'Scanned' : 'Typed'
       const r = await createEntry(me.id, plate, cat || already?.category || '', prepaid ? hours : 0, note, advance)
       setDone({ t: r.ticket, dup: r.duplicate })
       try { navigator.vibrate?.(r.duplicate ? [40, 60, 40] : 35) } catch { /* no vibration */ }
@@ -202,7 +204,10 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
       else void printSlip().then(() => print(r.ticket)) // the slip prints by itself; Reprint stays on screen
       // Training data (owner agreed): the scan's plate picture, what the scanner read and the plate saved. Kept 30 days.
       const sample = scanSample.current; scanSample.current = null
-      if (sample && !r.duplicate && apiEnabled) void callParking('saveScan', [r.ticket.id, normPlate(sample.read), sample.picture]).catch(() => {})
+      if (sample && !r.duplicate && apiEnabled) {
+        const send = () => callParking('saveScan', [r.ticket.id, normPlate(sample.read), sample.picture])
+        void send().catch(() => new Promise(ok => setTimeout(ok, 3000)).then(send)).catch(e => console.warn('Scan picture not saved:', (e as Error).message))
+      }
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
   const print = async (t: Ticket) => {

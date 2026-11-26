@@ -376,7 +376,7 @@ export const createEntry = (db: DB, s: Staff, plate: string, category: string, p
   if (expectedPrepaidPaise != null && advance !== expectedPrepaidPaise) throw new Refused('The advance amount changed. Check the updated amount before saving.')
   const t = newTicket(db, plate, category, s.id, now, prepaidHours)
   t.entryBy = s.name
-  log(db, s, 'entry', `Entry ${prettyPlate(t.plate)} · ${db.categories.find(c => c.id === category)?.name}${plateNote ? ` · plate confirmed: ${plateNote}` : ''}`, t.id)
+  log(db, s, 'entry', `Entry ${prettyPlate(t.plate)} · ${db.categories.find(c => c.id === category)?.name}${plateNote ? ` · ${plateNote}` : ''}`, t.id)
   if (prepaidHours) {
     const amt = advance
     addPayment(db, t, amt, s.id, now, 'prepaid').by = s.name
