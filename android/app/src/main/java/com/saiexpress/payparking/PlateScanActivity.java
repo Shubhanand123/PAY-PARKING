@@ -184,8 +184,15 @@ public class PlateScanActivity extends AppCompatActivity {
             ResolutionSelector resolution = new ResolutionSelector.Builder()
                 .setResolutionStrategy(new ResolutionStrategy(new Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build();
-            ImageAnalysis frames = new ImageAnalysis.Builder()
-                .setResolutionSelector(resolution)
+            ImageAnalysis.Builder framesBuilder = new ImageAnalysis.Builder()
+                .setResolutionSelector(resolution);
+            // Hand shake: keep the camera at 30 frames a second, so each picture is exposed for at most 1/30 s
+            // (in dim light phones otherwise slow down to 1/15 s or longer, and a moving hand smears the letters).
+            try {
+                new androidx.camera.camera2.interop.Camera2Interop.Extender<>(framesBuilder)
+                    .setCaptureRequestOption(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new android.util.Range<>(30, 30));
+            } catch (Throwable ignored) { /* camera keeps its own setting */ }
+            ImageAnalysis frames = framesBuilder
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build();
