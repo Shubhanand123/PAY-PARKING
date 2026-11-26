@@ -153,9 +153,8 @@ function DaySummary({ db }: { db: DB }) {
     {open && <div className="ds-bg" onClick={() => setOpen(false)}>
       <div className="ds" ref={sheet} onClick={e => e.stopPropagation()} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} role="dialog" aria-label="Daily summary">
         <div className="ds-handle"><div className="ds-grab" /><div className="ds-head"><b>Daily Summary</b><span>{fmtDate(now)}</span></div></div>
+        <div className="ds-total"><div><small>Total parkings today</small><b className="num">{entries}</b></div><div><span><b className="num">{exits}</b> exited</span><span><b className="num">{parked.length}</b> parked now</span></div></div>
         <div className="ds-money"><div className="g"><small>Cash</small><b className="num">{rupees(cash)}</b></div><div className="b"><small>UPI</small><b className="num">{rupees(upi)}</b></div></div>
-        <div className="ds-li"><span>Total entries</span><b className="num">{entries}</b></div>
-        <div className="ds-li"><span>Total exits</span><b className="num">{exits}</b></div>
         <div className="ds-li"><span>Outstanding (if all exit now)</span><b className="num o">{rupees(due)}</b></div>
         <small className="ds-lbl">PARKED NOW · {parked.length}</small>
         <div className="ds-vg">{cats.filter(x => x.c.active || x.n).map(x => <div key={x.c.id} style={{ color: x.n ? x.color : undefined }}><Ico n={x.c.icon} size={22} /><b className="num">{x.n}</b><span>{x.c.name}</span></div>)}</div>

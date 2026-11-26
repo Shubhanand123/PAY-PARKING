@@ -615,3 +615,6 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 .ds-vg > div { border: 1.5px solid var(--color-border); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
 .ds-vg b { font-size: 17px; } .ds-vg span { color: var(--color-text); text-align: center; }
 @keyframes ds-up { from { transform: translateY(40px); opacity: 0 } } @keyframes ds-fade { from { opacity: 0 } }
+.ds-total { display: flex; align-items: center; justify-content: space-between; border-radius: 16px; padding: 12px 14px; margin-top: 4px; background: color-mix(in srgb, var(--color-accent-text) 12%, transparent); }
+.ds-total small { display: block; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); } .ds-total > div > b { font-size: 30px; color: var(--color-accent-text); }
+.ds-total > div:last-child { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 12px; color: var(--color-text-secondary); } .ds-total span b { color: var(--color-text); }
