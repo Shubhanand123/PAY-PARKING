@@ -10,7 +10,7 @@ import { nativeApp, PlateReader } from './native'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  activeTariff, billFor, charge, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
+  activeTariff, billFor, charge, istDay, checkPlate, findActiveByPlate, findTicketBySlip, fmtDT, fmtTime, dur,
   isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, paidOnPhone, paidUntil, type DB, type Receipt, type Staff, type Ticket,
 } from './engine'
 import { printSlip } from './print'
@@ -107,6 +107,51 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
 }
 
 // ---------- entry ----------
+
+const RING = ['#3b6cf0', '#8a63f5', '#16a8a8', '#f59e0b', '#ef4444', '#10b981']
+/** Today's collection and the vehicles parked now. Tap for the Daily Summary. */
+function DaySummary({ db }: { db: DB }) {
+  const now = useNow(30_000)
+  const [open, setOpen] = useState(false)
+  const today = istDay(now)
+  const pays = db.payments.filter(p => istDay(p.at) === today)
+  const cash = pays.filter(p => p.method === 'cash').reduce((s, p) => s + p.amountPaise, 0)
+  const upi = pays.filter(p => p.method !== 'cash').reduce((s, p) => s + p.amountPaise, 0)
+  const parked = db.tickets.filter(t => t.status === 'inside' || t.status === 'paid')
+  let due = 0
+  for (const t of parked) { try { due += billFor(db, t, now).duePaise } catch { /* skip */ } }
+  const cats = db.categories.map((c, i) => ({ c, n: parked.filter(t => t.category === c.id).length, color: RING[i % RING.length] }))
+  let acc = 0
+  const stops = parked.length ? cats.filter(x => x.n).map(x => { const a = acc; acc += x.n / parked.length * 100; return `${x.color} ${a}% ${acc}%` }).join(',') : '#e7ecf6 0 100%'
+  const entries = db.tickets.filter(t => istDay(t.entryAt) === today && t.status !== 'cancelled').length
+  const exits = db.tickets.filter(t => t.exitAt && istDay(t.exitAt) === today).length
+  return <>
+    <button className="oc" onClick={() => setOpen(true)} aria-label="Open daily summary">
+      <span className="oc-ring" style={{ background: `conic-gradient(${stops})` }}><span><b className="num">{parked.length}</b><small>parked</small></span></span>
+      <span className="oc-text">
+        <small>Today's Collection</small>
+        <b className="num oc-v">{rupees(cash + upi)}</b>
+        <span className="oc-sub num">Cash {rupees(cash)} · UPI {rupees(upi)}</span>
+        {due > 0 && <span className="oc-due num">{rupees(due)} due</span>}
+        <span className="oc-hint">Tap for full summary</span>
+      </span>
+    </button>
+    {open && <div className="ds-bg" onClick={() => setOpen(false)}>
+      <div className="ds" onClick={e => e.stopPropagation()} role="dialog" aria-label="Daily summary">
+        <div className="ds-grab" />
+        <div className="ds-head"><b>Daily Summary</b><span>{fmtDate(now)}</span></div>
+        <div className="ds-money"><div className="g"><small>Cash</small><b className="num">{rupees(cash)}</b></div><div className="b"><small>UPI</small><b className="num">{rupees(upi)}</b></div></div>
+        <div className="ds-li"><span>Total entries</span><b className="num">{entries}</b></div>
+        <div className="ds-li"><span>Total exits</span><b className="num">{exits}</b></div>
+        <div className="ds-li"><span>Outstanding (if all exit now)</span><b className="num o">{rupees(due)}</b></div>
+        <small className="ds-lbl">PARKED NOW · {parked.length}</small>
+        <div className="ds-vg">{cats.filter(x => x.c.active || x.n).map(x => <div key={x.c.id} style={{ color: x.n ? x.color : undefined }}><Ico n={x.c.icon} size={22} /><b className="num">{x.n}</b><span>{x.c.name}</span></div>)}</div>
+        <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12 }} onClick={() => setOpen(false)}>Close</button>
+      </div>
+    </div>}
+  </>
+}
+
 export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; onFlow?: (flow: string) => void }) {
   useEffect(() => { if (!nativeApp) void warmPlateReader().catch(() => {}) }, [])
   const [plate, setPlate] = useState('')
@@ -176,6 +221,7 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
 
   return (
     <div className="stack">
+      <DaySummary db={db} />
       <div className="card">
         <button className="btn btn-primary btn-xl" onClick={() => setScanning(true)}><Ico n="scan" size={26} /> Scan plate</button>
         {scanning && <PlateScanner onClose={() => setScanning(false)} onRead={result => {
@@ -208,7 +254,6 @@ export function Entry({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m:
               <span className={'cat-ico v-' + c.id}><Ico n={c.icon} size={34} /></span>
               <span className="cat-name">{c.name}</span>
               <span className="cat-rate"><b className="num">{rupees(tv.rates[c.id].firstPaise)}</b><em>/ {tv.rates[c.id].firstHours}h</em></span>
-              <small className="cat-more num">then {rupees(tv.rates[c.id].perHourPaise)}/hr</small>
             </button>
           ))}
         </div>

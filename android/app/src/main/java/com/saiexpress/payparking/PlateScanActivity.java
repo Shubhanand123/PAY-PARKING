@@ -236,6 +236,8 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     /** Cuts the upright rectangle out of the raw picture and turns only that small piece upright. */
+    private Rect lastBox; private long lastBoxAt; private String lastOwn; private long lastOwnAt; private int ownStreak;
+
     private static Bitmap cutUpright(Bitmap raw, Rect upright, int rotation) {
         Rect r = toRaw(upright, rotation, raw.getWidth(), raw.getHeight());
         r.intersect(0, 0, raw.getWidth(), raw.getHeight());
@@ -264,7 +266,10 @@ public class PlateScanActivity extends AppCompatActivity {
         PlateFinder finder = PlateFinder.ready(); // not loaded yet: read the old way for these first frames
         if (finder != null) {
             try {
-                Rect box = finder.find(raw, rotation);
+                // The finder runs on every 2nd frame; between, the last box (under 0.2 s old) is reused, grown a bit more.
+                boolean reuse = (framesSeen % 2 == 0) && lastBox != null && System.currentTimeMillis() - lastBoxAt < 200;
+                Rect box = reuse ? lastBox : finder.find(raw, rotation);
+                if (!reuse) { lastBox = box; lastBoxAt = System.currentTimeMillis(); }
                 if (box != null) {
                     int mx = Math.round(box.width() * 0.12f), my = Math.round(box.height() * 0.35f);
                     Rect grown = new Rect(Math.max(0, box.left - mx), Math.max(0, box.top - my), Math.min(uw, box.right + mx), Math.min(uh, box.bottom + my));
@@ -289,7 +294,15 @@ public class PlateScanActivity extends AppCompatActivity {
                 PlateTextReader.Reading rd = ours.read(band);
                 long took = (System.nanoTime() - tr) / 1_000_000;
                 String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
-                if (plate != null && rd.confidence >= 0.80f) { // v4 reader at 80%: right 141/142 on unseen Indian plates
+                // Sure (80%+) at once; or, for side angles and blur, the same plate read in 3 frames in a row (each 65%+).
+                // (A single 65-80% reading is right only about half the time, so one agreeing frame is not enough.)
+                boolean agreed = false;
+                if (plate != null && rd.confidence >= 0.65f) {
+                    ownStreak = plate.equals(lastOwn) && System.currentTimeMillis() - lastOwnAt < 1500 ? ownStreak + 1 : 1;
+                    lastOwn = plate; lastOwnAt = System.currentTimeMillis();
+                    agreed = ownStreak >= 3;
+                }
+                if (plate != null && (rd.confidence >= 0.80f || agreed)) {
                     final Bitmap seen = band;
                     main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; lastPicture = seen; finishWith(plate, new ArrayList<>(), null); } });
                     return;

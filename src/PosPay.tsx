@@ -159,7 +159,6 @@ export function PosPay({ t, amount, vehicle, lines = [], paid, onRevision, onDon
 
       <div className="q9-actions">
         {state === 'expired' && <button className="btn btn-xl q9-dark" disabled={busy} onClick={() => void remake()}><Ico n="qr" /> Make new QR · {rupees(amount)}</button>}
-        {state === 'waiting' && <button className="btn btn-success btn-lg q9-paidbtn" disabled={busy} onClick={() => void run(async () => { const r = await confirmUpi('sunil', t.id, t.rev); celebrated.current = true; cashCelebrate(amount, prettyPlate(t.plate)); onRevision(r.rev) })}><Ico n="check" /> Customer paid</button>}
         {!paid && !confirmCash && <button className="btn btn-ghost btn-lg" disabled={busy} onClick={() => setConfirmCash(true)}><Ico n="cash" /> Switch to cash</button>}
         {message && <p className="msg bad" role="alert">{message}</p>}
         {!paid && <p className="q9-foot">Checked automatically every 1.5 s · <button className="link" disabled={busy} onClick={() => void check()}>Check now</button></p>}
