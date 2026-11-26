@@ -113,6 +113,20 @@ const RING = ['#3b6cf0', '#8a63f5', '#16a8a8', '#f59e0b', '#ef4444', '#10b981']
 function DaySummary({ db }: { db: DB }) {
   const now = useNow(30_000)
   const [open, setOpen] = useState(false)
+  const sheet = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ y: number; dy: number } | null>(null)
+  // Swipe down to close: drag the handle, or pull down when the list is already at the top.
+  const onStart = (e: React.TouchEvent) => { if ((sheet.current?.scrollTop ?? 0) <= 0) drag.current = { y: e.touches[0].clientY, dy: 0 } }
+  const onMove = (e: React.TouchEvent) => {
+    const d = drag.current; if (!d || !sheet.current) return
+    d.dy = Math.max(0, e.touches[0].clientY - d.y)
+    if (d.dy > 0 && sheet.current.scrollTop <= 0) { sheet.current.style.transition = 'none'; sheet.current.style.transform = `translateY(${d.dy}px)` }
+  }
+  const onEnd = () => {
+    const d = drag.current; drag.current = null; if (!d || !sheet.current) return
+    sheet.current.style.transition = 'transform .18s ease-out'
+    if (d.dy > 90) { sheet.current.style.transform = 'translateY(100%)'; setTimeout(() => setOpen(false), 170) } else sheet.current.style.transform = ''
+  }
   const today = istDay(now)
   const pays = db.payments.filter(p => istDay(p.at) === today)
   const cash = pays.filter(p => p.method === 'cash').reduce((s, p) => s + p.amountPaise, 0)
@@ -122,7 +136,7 @@ function DaySummary({ db }: { db: DB }) {
   for (const t of parked) { try { due += billFor(db, t, now).duePaise } catch { /* skip */ } }
   const cats = db.categories.map((c, i) => ({ c, n: parked.filter(t => t.category === c.id).length, color: RING[i % RING.length] }))
   let acc = 0
-  const stops = parked.length ? cats.filter(x => x.n).map(x => { const a = acc; acc += x.n / parked.length * 100; return `${x.color} ${a}% ${acc}%` }).join(',') : '#e7ecf6 0 100%'
+  const stops = parked.length ? cats.filter(x => x.n).map(x => { const a = acc; acc += x.n / parked.length * 100; return `${x.color} ${a}% ${acc}%` }).join(',') : 'var(--color-border) 0 100%'
   const entries = db.tickets.filter(t => istDay(t.entryAt) === today && t.status !== 'cancelled').length
   const exits = db.tickets.filter(t => t.exitAt && istDay(t.exitAt) === today).length
   return <>
@@ -137,9 +151,8 @@ function DaySummary({ db }: { db: DB }) {
       </span>
     </button>
     {open && <div className="ds-bg" onClick={() => setOpen(false)}>
-      <div className="ds" onClick={e => e.stopPropagation()} role="dialog" aria-label="Daily summary">
-        <div className="ds-grab" />
-        <div className="ds-head"><b>Daily Summary</b><span>{fmtDate(now)}</span></div>
+      <div className="ds" ref={sheet} onClick={e => e.stopPropagation()} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} role="dialog" aria-label="Daily summary">
+        <div className="ds-handle"><div className="ds-grab" /><div className="ds-head"><b>Daily Summary</b><span>{fmtDate(now)}</span></div></div>
         <div className="ds-money"><div className="g"><small>Cash</small><b className="num">{rupees(cash)}</b></div><div className="b"><small>UPI</small><b className="num">{rupees(upi)}</b></div></div>
         <div className="ds-li"><span>Total entries</span><b className="num">{entries}</b></div>
         <div className="ds-li"><span>Total exits</span><b className="num">{exits}</b></div>
