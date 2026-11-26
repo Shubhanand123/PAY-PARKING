@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { dur, prettyPlate, rupees, type Ticket } from './engine'
 import { callParkingPayment } from './parking-api'
 import { chime } from './done'
-import { confirmUpi } from './actions'
-import { cashCelebrate } from './celebrate'
 import { Ico, QR } from './ui'
 
 type Order = { order_id: string; amount: number; link_url?: string; upi_qr?: string; qr_image?: string }
