@@ -28,3 +28,9 @@ Tried and not useful: Roboflow "Vehicle Detection Indian v1" (plates too small),
 1. Faster plate finder at 224 px (YOLOX, Apache-2.0 — not ultralytics/YOLOv9 repo, licence).
 2. 4-corner plate model for proper side-angle straightening.
 3. Retrain the reader on straightened crops; later on the gate's own saved scans (Supabase table `parking_scans`, bucket `scans`).
+
+## Real plate images (in the repo)
+`training/data/plates.tgz.part*` = all 10,186 real labelled crops (train/val/test/extra/self/npds/iurs), resized to 256×128 JPEG, with their csv files (paths point to the .jpg). Synthetic plates are not included: run `synth.py`.
+```bash
+cat training/data/plates.tgz.part* | tar xzf - -C <anpr>/ocrdata
+```
