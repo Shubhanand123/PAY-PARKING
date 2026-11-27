@@ -7,9 +7,10 @@ log() { echo "$(date +%H:%M:%S) $*" | tee -a $A/night.log; }
 set -o pipefail
 log "setup"
 pip install -q opencv-python-headless loguru thop tabulate psutil onnx pycocotools >> setup.log 2>&1 || log "pip (torch side) FAILED"
-[ -d $A/tfenv ] || { python -m venv $A/tfenv && $A/tfenv/bin/pip install -q "tensorflow[and-cuda]==2.21.0" "keras==3.15.1" "fast-plate-ocr[train]==1.1.0" opencv-python-headless >> setup.log 2>&1 || log "pip (tf side) FAILED"; }
+[ -d $A/tfenv ] || { python -m venv $A/tfenv && $A/tfenv/bin/pip install -q "tensorflow[and-cuda]==2.21.0" "keras==3.15.1" "fast-plate-ocr[train,onnx]==1.1.0" onnxruntime opencv-python-headless >> setup.log 2>&1 || log "pip (tf side) FAILED"; }
 python -c "import torch; print('torch', torch.__version__, torch.cuda.get_device_name(0))" 2>&1 | tee -a night.log
 $A/tfenv/bin/python -c "import tensorflow as tf; print('tf gpus', tf.config.list_physical_devices('GPU'))" 2>&1 | grep gpus | tee -a night.log
+$A/tfenv/bin/python -c "from fast_plate_ocr.train.model import layers; import onnxruntime; print('reader packages ok')" 2>&1 | tail -1 | tee -a night.log
 NC=$(nproc); log "cpus $NC"
 log "(a) finder + (b) corners stage 1"
 YOLOX_SRC=$A/yolox_src WEIGHTS=$A/weights/yolox_nano.pth BS=64 WORKERS=$((NC / 2)) python -u $P/yolox_train.py $A/det $A/runs/finder ${FINDER_EPOCHS:-150} > finder.log 2>&1 &
