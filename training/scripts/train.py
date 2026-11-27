@@ -20,7 +20,7 @@ def load(csvname, hi=1):
     return X, Y, T
 Xr, Yr, _ = load('train.csv', HI); Xs, Ys, _ = load('synth.csv')
 # more real Indian plates: character-labelled sets and self-labelled plates (if present)
-for extra in ('extra.csv', 'self.csv', 'npds.csv', 'iurs.csv', 'hrlr.csv', 'hfgam.csv'):
+for extra in ('extra.csv', 'self.csv', 'npds.csv', 'iurs.csv', 'hrlr.csv', 'hfgam.csv', 'kaggle.csv'):
     if os.path.exists(os.path.join(D, extra)):
         Xe, Ye, _ = load(extra, HI); Xr = np.concatenate([Xr, Xe]); Yr = np.concatenate([Yr, Ye]); print('added', extra, len(Xe), flush=True); Xv, Yv, Tv = load('val.csv'); Xt, Yt, Tt = load('test.csv')
 print('real train', len(Xr), 'synthetic', len(Xs), 'val', len(Xv), 'test', len(Xt), flush=True)

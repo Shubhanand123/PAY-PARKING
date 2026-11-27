@@ -40,3 +40,9 @@ cat training/data/plates.tgz.part* | tar xzf - -C <anpr>/ocrdata
 ```bash
 tar xzf training/data/nolicence_plates.tgz -C <anpr>/ocrdata
 ```
+
+## Kaggle "Indian License Plate Images" (umar1103/final-licence, CC BY 4.0)
+30,451 files; label = file name. Half are CAPTCHA-style or invalid → dropped. Kept 15,987 with valid Indian numbers (mostly rendered/synthetic plates: yellow, green, two-line, blurred). `kaggle.csv`, loaded by `train.py` when present.
+```bash
+cat training/data/kaggle.tgz.part* | tar xzf - -C <anpr>/ocrdata
+```
