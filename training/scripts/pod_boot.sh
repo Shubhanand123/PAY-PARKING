@@ -14,6 +14,7 @@ cp -r repo/training/scripts $A/scripts
 pip install -q opencv-python-headless pillow loguru thop tabulate psutil onnx pycocotools > $A/pip.log 2>&1 || fail "pip"
 # reader data: real crops from the repo + synthetic plates
 mkdir -p anpr/ocrdata && cat repo/training/data/plates.tgz.part* | tar xzf - -C anpr/ocrdata || fail "plates.tgz"
+tar xzf repo/training/data/nolicence_plates.tgz -C anpr/ocrdata || fail "nolicence_plates.tgz"  # HR-LR side-angle crops (owner's decision)
 cp repo/training/models/reader_v4.keras anpr/
 python -I scripts/synth.py $A/anpr/ocrdata 20000 || fail "synth"
 cmp <(cut -d, -f2 anpr/ocrdata/synth.csv) <(cut -d, -f2 repo/training/labels/synth.csv) && log "synthetic labels identical" || log "synthetic labels differ (fonts?)"
