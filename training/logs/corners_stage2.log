@@ -1,0 +1,23 @@
+pseudo corners kept for 2216 of 5785 box-only plates
+train plates 5432 | exact-corner plates 804 | val {'real corners (hand-labelled, val+test)': 199, 'real corners, turned 20-50 deg': 199, '163 test plates, turned 20-50 deg': 163}
+epoch 1/20 loss 0.0651 real corners (hand-labelled, val+test): 3.8% (box alone 7.1%) | real corners, turned 20-50 deg: 4.6% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.4% (box alone 11.5%) 116s
+epoch 2/20 loss 0.0272 real corners (hand-labelled, val+test): 3.6% (box alone 7.1%) | real corners, turned 20-50 deg: 3.8% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.5% (box alone 11.5%) 117s
+epoch 3/20 loss 0.0215 real corners (hand-labelled, val+test): 3.2% (box alone 7.1%) | real corners, turned 20-50 deg: 3.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.3% (box alone 11.5%) 113s
+epoch 4/20 loss 0.0191 real corners (hand-labelled, val+test): 3.0% (box alone 7.1%) | real corners, turned 20-50 deg: 3.1% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.3% (box alone 11.5%) 116s
+epoch 5/20 loss 0.0170 real corners (hand-labelled, val+test): 2.9% (box alone 7.1%) | real corners, turned 20-50 deg: 2.9% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.9% (box alone 11.5%) 116s
+epoch 6/20 loss 0.0157 real corners (hand-labelled, val+test): 2.6% (box alone 7.1%) | real corners, turned 20-50 deg: 2.8% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.0% (box alone 11.5%) 115s
+epoch 7/20 loss 0.0148 real corners (hand-labelled, val+test): 2.8% (box alone 7.1%) | real corners, turned 20-50 deg: 3.0% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 110s
+epoch 8/20 loss 0.0141 real corners (hand-labelled, val+test): 3.2% (box alone 7.1%) | real corners, turned 20-50 deg: 3.3% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.8% (box alone 11.5%) 111s
+epoch 9/20 loss 0.0130 real corners (hand-labelled, val+test): 2.5% (box alone 7.1%) | real corners, turned 20-50 deg: 2.7% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.3% (box alone 11.5%) 113s
+epoch 10/20 loss 0.0123 real corners (hand-labelled, val+test): 2.6% (box alone 7.1%) | real corners, turned 20-50 deg: 2.7% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.0% (box alone 11.5%) 112s
+epoch 11/20 loss 0.0116 real corners (hand-labelled, val+test): 2.4% (box alone 7.1%) | real corners, turned 20-50 deg: 2.6% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.7% (box alone 11.5%) 116s
+epoch 12/20 loss 0.0111 real corners (hand-labelled, val+test): 2.4% (box alone 7.1%) | real corners, turned 20-50 deg: 2.5% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.7% (box alone 11.5%) 167s
+epoch 13/20 loss 0.0105 real corners (hand-labelled, val+test): 2.4% (box alone 7.1%) | real corners, turned 20-50 deg: 2.6% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.8% (box alone 11.5%) 164s
+epoch 14/20 loss 0.0096 real corners (hand-labelled, val+test): 2.4% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.4% (box alone 11.5%) 114s
+epoch 15/20 loss 0.0094 real corners (hand-labelled, val+test): 2.3% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.7% (box alone 11.5%) 109s
+epoch 16/20 loss 0.0089 real corners (hand-labelled, val+test): 2.4% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 109s
+epoch 17/20 loss 0.0087 real corners (hand-labelled, val+test): 2.3% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 168s
+epoch 18/20 loss 0.0084 real corners (hand-labelled, val+test): 2.3% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 112s
+epoch 19/20 loss 0.0082 real corners (hand-labelled, val+test): 2.3% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 112s
+epoch 20/20 loss 0.0081 real corners (hand-labelled, val+test): 2.3% (box alone 7.1%) | real corners, turned 20-50 deg: 2.4% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 7.6% (box alone 11.5%) 110s
+TRAINING DONE

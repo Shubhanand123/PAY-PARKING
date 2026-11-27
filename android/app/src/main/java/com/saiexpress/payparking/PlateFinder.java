@@ -19,13 +19,14 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 
 /**
- * Finds the number plate in a camera picture (YOLOv9-tiny, 256 x 256, trained on plates; MIT, open-image-models).
+ * Finds the number plate in a camera picture (YOLOX-nano, 224 x 224, Apache-2.0, trained by us on Indian plate photos:
+ * training/scripts/yolox_train.py). Tested on the 163 test plates: found 98.8% (old YOLOv9-t 256: 95.7%), tight box 95.7%
+ * (old 79.3%), 2.6x faster on a CPU. The old model's output format still works if its file is put back.
  * Runs on the CPU (all cores). Protected by a crash guard: if it ever takes the app down, it stays off on that phone.
  * Returns the plate box in the picture's own pixels, so the text reader only has to read that small box.
  */
 final class PlateFinder {
     private static final String TAG = "PlateFinder";
-    private static final int SIZE = 256;
     private static final float MIN_SCORE = 0.3f;
 
     private static volatile PlateFinder shared;
@@ -36,16 +37,17 @@ final class PlateFinder {
     private final OrtSession session;
     private final String inputName;
     final String engine; // shown in the timing line
-    private final Bitmap board = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
-    private final Canvas canvas = new Canvas(board);
+    private final int SIZE; // from the model: 224 (YOLOX) or 256 (old YOLOv9)
+    private final Bitmap board;
+    private final Canvas canvas;
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final int[] pixels = new int[SIZE * SIZE];
-    private final FloatBuffer input = FloatBuffer.allocate(3 * SIZE * SIZE);
+    private final int[] pixels;
+    private final FloatBuffer input;
 
     // Crash guard: a flag is written before the model first loads and runs, and cleared once it has worked.
     // If the app is killed in between (a native crash), the flag is still there at the next start and the finder
     // stays switched off on this phone; the scanner then reads the plate the old way.
-    private static final String PREFS = "plate_finder", TRYING = "trying_v1", OFF = "off_v1";
+    private static final String PREFS = "plate_finder", TRYING = "trying_v2", OFF = "off_v2"; // v2: new model, fresh try
 
     /** The finder if it is already loaded, without waiting (the scanner reads the old way until then). */
     static PlateFinder ready() { return shared; }
@@ -75,7 +77,7 @@ final class PlateFinder {
     }
 
     private PlateFinder(Context context) throws Exception {
-        byte[] model = read(context, "models/plate_finder_256.onnx");
+        byte[] model = read(context, "models/plate_finder_224.onnx");
         env = OrtEnvironment.getEnvironment();
         // CPU only: the AI-chip path (NNAPI) crashed the whole app on a POS (a native crash that can't be caught).
         OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
@@ -86,6 +88,10 @@ final class PlateFinder {
         session = s;
         engine = used;
         inputName = session.getInputNames().iterator().next();
+        long[] shape = ((ai.onnxruntime.TensorInfo) session.getInputInfo().get(inputName).getInfo()).getShape();
+        SIZE = (int) shape[2];
+        board = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888); canvas = new Canvas(board);
+        pixels = new int[SIZE * SIZE]; input = FloatBuffer.allocate(3 * SIZE * SIZE);
         find(Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)); // first run is slow: do it now, not on the first vehicle
     }
 
@@ -144,14 +150,15 @@ final class PlateFinder {
         }
         try (OnnxTensor tensor = OnnxTensor.createTensor(env, input, new long[] { 1, 3, SIZE, SIZE });
              OrtSession.Result out = run(tensor)) {
-            float[][] rows = (float[][]) out.get(0).getValue(); // [batch, x1, y1, x2, y2, class, score]
+            float[][] rows = (float[][]) out.get(0).getValue(); // YOLOX: [x1, y1, x2, y2, score]; old: [batch, x1, y1, x2, y2, class, score]
             Rect best = null;
             double bestScore = -1;
             for (float[] row : rows) {
-                if (row.length < 7 || row[6] < MIN_SCORE) continue;
-                float x1 = (row[1] - dx) / r, y1 = (row[2] - dy) / r, x2 = (row[3] - dx) / r, y2 = (row[4] - dy) / r;
+                int o = row.length >= 7 ? 1 : 0; float sc = row.length >= 7 ? row[6] : row.length == 5 ? row[4] : -1;
+                if (sc < MIN_SCORE) continue;
+                float x1 = (row[o] - dx) / r, y1 = (row[o + 1] - dy) / r, x2 = (row[o + 2] - dx) / r, y2 = (row[o + 3] - dy) / r;
                 double cx = (x1 + x2) / 2 / w - 0.5, cy = (y1 + y2) / 2 / h - 0.5;
-                double score = row[6] - (cx * cx + cy * cy); // sure, and near the middle
+                double score = sc - (cx * cx + cy * cy); // sure, and near the middle
                 if (score > bestScore) { bestScore = score; best = new Rect(Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)); }
             }
             return best;

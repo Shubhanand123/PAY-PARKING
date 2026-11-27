@@ -1,0 +1,22 @@
+{
+ "YOLOv9-t 256 (now) | 163 test plates (payals test photos)": [
+  0.9573170731707317,
+  0.7926829268292683
+ ],
+ "YOLOv9-t 256 (now) | all test photos": [
+  0.831814415907208,
+  0.6735708367854184
+ ],
+ "YOLOv9-t 256 (now) | ms1": 15.462979726665555,
+ "YOLOv9-t 256 (now) | ms4": 10.265948393334838,
+ "YOLOX-nano 224 (new) | 163 test plates (payals test photos)": [
+  0.9878048780487805,
+  0.9573170731707317
+ ],
+ "YOLOX-nano 224 (new) | all test photos": [
+  0.9552609776304888,
+  0.8500414250207126
+ ],
+ "YOLOX-nano 224 (new) | ms1": 6.000375373338708,
+ "YOLOX-nano 224 (new) | ms4": 4.555053380002694
+}

@@ -1,0 +1,39 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1795817568.843399    1027 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1795817569.677039    1027 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+added extra.csv 386
+added self.csv 1466
+added npds.csv 4206
+added iurs.csv 960
+added hrlr.csv 3606
+added hfgam.csv 20
+real train 13149 synthetic 16841 val 500 test 163
+before training: val 0.92 test 0.902
+epoch 1/20 loss 0.303 train-acc 0.820 val-acc 0.900 best 0.920 22:14:12
+epoch 2/20 loss 0.294 train-acc 0.824 val-acc 0.902 best 0.920 22:14:21
+epoch 3/20 loss 0.291 train-acc 0.828 val-acc 0.898 best 0.920 22:14:29
+epoch 4/20 loss 0.285 train-acc 0.831 val-acc 0.886 best 0.920 22:14:39
+epoch 5/20 loss 0.282 train-acc 0.832 val-acc 0.906 best 0.920 22:14:48
+epoch 6/20 loss 0.279 train-acc 0.835 val-acc 0.896 best 0.920 22:14:56
+epoch 7/20 loss 0.273 train-acc 0.843 val-acc 0.904 best 0.920 22:15:07
+epoch 8/20 loss 0.274 train-acc 0.840 val-acc 0.916 best 0.920 22:15:15
+epoch 9/20 loss 0.270 train-acc 0.846 val-acc 0.896 best 0.920 22:15:25
+epoch 10/20 loss 0.267 train-acc 0.850 val-acc 0.892 best 0.920 22:15:33
+epoch 11/20 loss 0.267 train-acc 0.850 val-acc 0.908 best 0.920 22:15:42
+epoch 12/20 loss 0.265 train-acc 0.852 val-acc 0.904 best 0.920 22:15:52
+epoch 13/20 loss 0.265 train-acc 0.854 val-acc 0.906 best 0.920 22:16:00
+epoch 14/20 loss 0.262 train-acc 0.855 val-acc 0.908 best 0.920 22:16:09
+epoch 15/20 loss 0.263 train-acc 0.854 val-acc 0.898 best 0.920 22:16:19
+epoch 16/20 loss 0.260 train-acc 0.859 val-acc 0.898 best 0.920 22:16:27
+epoch 17/20 loss 0.261 train-acc 0.858 val-acc 0.902 best 0.920 22:16:35
+epoch 18/20 loss 0.259 train-acc 0.859 val-acc 0.902 best 0.920 22:16:45
+epoch 19/20 loss 0.260 train-acc 0.858 val-acc 0.900 best 0.920 22:16:54
+epoch 20/20 loss 0.259 train-acc 0.861 val-acc 0.900 best 0.920 22:17:03
+Traceback (most recent call last):
+  File "/workspace/scripts/train.py", line 118, in <module>
+    model = keras.models.load_model(os.path.join(A, os.environ.get('OUT', 'best_reader.keras')), compile=False, custom_objects={'plate_acc': plate_acc})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/tfenv/lib/python3.11/site-packages/keras/src/saving/saving_api.py", line 214, in load_model
+    raise ValueError(
+ValueError: File not found: filepath=/workspace/anpr/reader_v5.keras. Please ensure the file is an accessible `.keras` zip file.

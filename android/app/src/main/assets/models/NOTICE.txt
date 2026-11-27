@@ -1,23 +1,19 @@
-plate_finder_256.onnx: "yolo-v9-t-256-license-plate-end2end" from open-image-models
-https://github.com/ankandrew/open-image-models
-MIT License, Copyright (c) 2024 ankandrew
+plate_finder_224.onnx: YOLOX-nano (Megvii, https://github.com/Megvii-BaseDetection/YOLOX), Apache License 2.0,
+Copyright (c) 2021-2022 Megvii Inc. Fine-tuned by us from the YOLOX-nano COCO weights on:
+ - Mendeley "Indian Number Plate Dataset (IURS) - NPDS" (sxrnr7hwtk), CC BY 4.0
+ - Roboflow Universe "Indian Number Plate Detection" (payals-workspace-gz1ub), CC BY 4.0
+ - Roboflow Universe "Indian-License-Plate-Merged" (abduls-workspace-qwhgu), CC BY 4.0
+ - Roboflow Universe "License-plate-keypoint" (mydataset-zrfok) and "license-plate-keypoint" (raymond-bepag), CC BY 4.0
+Test (163 test plates): plate found 98.8%, tight box 95.7%; 6.0 ms per photo on one CPU thread (old YOLOv9-t 256: 95.7%, 79.3%, 15.5 ms).
+Apache License 2.0: http://www.apache.org/licenses/LICENSE-2.0
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the Software without restriction, including without limitation
-the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+plate_corners.onnx: 4-corner plate model, MobileNetV3-small backbone (torchvision, BSD 3-Clause License,
+Copyright (c) Soumith Chintala 2016, ImageNet weights), trained by us on the hand-labelled corners of the two
+Roboflow corner sets above (CC BY 4.0), turned in 3D for side angles.
 
 Runtime: ONNX Runtime (Microsoft), MIT License.
 
-Both models store their weights as float16 (converted back to float32 when loaded; results unchanged).
+All models store their weights as float16 (converted back to float32 when loaded; results unchanged).
 
 plate_reader_in.onnx: Indian number plate reader. Starts from fast-plate-ocr "cct-xs-v2-global" (MIT License,
 Copyright (c) ankandrew, https://github.com/ankandrew/fast-plate-ocr), fine-tuned on:

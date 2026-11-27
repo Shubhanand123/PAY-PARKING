@@ -120,6 +120,7 @@ public class PlateScanActivity extends AppCompatActivity {
         boolean readsQr = getIntent().getBooleanExtra(EXTRA_QR, false);
         PlateFinder.loadInBackground(this); // only when scanning: the app itself never depends on it
         PlateTextReader.loadInBackground(this);
+        PlateCorners.loadInBackground(this);
         text = textReader();
         if (readsQr) qr = qrReader();
 
@@ -293,11 +294,22 @@ public class PlateScanActivity extends AppCompatActivity {
         if (ours != null) {
             try {
                 long tr = System.nanoTime();
-                PlateTextReader.Reading rd = ours.read(band);
+                PlateTextReader.Reading rd;
                 boolean turned = false;
-                String plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
+                String plate;
+                PlateCorners corners = PlateCorners.ready();
+                if (corners != null) {
+                    // 4-corner model: the plate's corners in the box, warped flat (also side angles), then read.
+                    // Tested on the 163 test plates (whole chain): exact 81.8% straight / 76.0% turned 20-50 deg,
+                    // was 72.7% / 60.4% with the old finder and tilt/lean straightening.
+                    rd = ours.read(corners.flatten(band)); turned = true;
+                    plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
+                } else {
+                    rd = ours.read(band);
+                    plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
+                }
                 // Not sure yet (often a side angle): straighten the plate (tilt + lean) and read it again; keep the surer reading.
-                if (plate == null || rd.confidence < 0.95f) {
+                if (corners == null && (plate == null || rd.confidence < 0.95f)) {
                     PlateStraightener.Result st = PlateStraightener.straighten(band);
                     if (st.changed()) {
                         PlateTextReader.Reading rd2 = ours.read(st.picture);
