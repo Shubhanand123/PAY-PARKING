@@ -34,3 +34,9 @@ Tried and not useful: Roboflow "Vehicle Detection Indian v1" (plates too small),
 ```bash
 cat training/data/plates.tgz.part* | tar xzf - -C <anpr>/ocrdata
 ```
+
+## No-licence data (owner's decision, 27 Nov 2026 — kept separate so it can be removed)
+`training/data/nolicence_plates.tgz` → `hrlr.csv` (3,606 crops, 448 numbers, many strongly tilted/side-angle; HF adityamangal98/HR-LR-images-of-the-Indian-License-plates, labelled by reader v4 ≥95% after trying straightened/mirrored) and `hfgam.csv` (20; HF Gamester03/indian-number-plate). `train.py` now also loads these when present.
+```bash
+tar xzf training/data/nolicence_plates.tgz -C <anpr>/ocrdata
+```
