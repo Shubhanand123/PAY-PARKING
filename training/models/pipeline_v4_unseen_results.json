@@ -1,0 +1,98 @@
+{
+ "old256 | straight | v4 | now: read, then tilt/lean if unsure": {
+  "exact": 0.7272727272727273,
+  "taken95": 0.6103896103896104,
+  "wrong95": 0,
+  "taken80": 0.7142857142857143,
+  "wrong80": 3,
+  "read_ms": 3.649022623372352
+ },
+ "old256 | straight | v4 | corners, then read": {
+  "exact": 0.7532467532467533,
+  "taken95": 0.7142857142857143,
+  "wrong95": 1,
+  "taken80": 0.7792207792207793,
+  "wrong80": 3,
+  "read_ms": 3.633287688296752
+ },
+ "old256 | straight | v4 | read, then corners if unsure": {
+  "exact": 0.7662337662337663,
+  "taken95": 0.7272727272727273,
+  "wrong95": 1,
+  "taken80": 0.8051948051948052,
+  "wrong80": 3,
+  "read_ms": 3.664269571428039
+ },
+ "old256 | turned 20-50 deg | v4 | now: read, then tilt/lean if unsure": {
+  "exact": 0.6753246753246753,
+  "taken95": 0.5194805194805194,
+  "wrong95": 1,
+  "taken80": 0.6493506493506493,
+  "wrong80": 3,
+  "read_ms": 3.6969333246910443
+ },
+ "old256 | turned 20-50 deg | v4 | corners, then read": {
+  "exact": 0.7272727272727273,
+  "taken95": 0.6753246753246753,
+  "wrong95": 2,
+  "taken80": 0.7532467532467533,
+  "wrong80": 3,
+  "read_ms": 3.2626754285744237
+ },
+ "old256 | turned 20-50 deg | v4 | read, then corners if unsure": {
+  "exact": 0.7142857142857143,
+  "taken95": 0.6753246753246753,
+  "wrong95": 3,
+  "taken80": 0.7532467532467533,
+  "wrong80": 4,
+  "read_ms": 3.8550871168726273
+ },
+ "new224 | straight | v4 | now: read, then tilt/lean if unsure": {
+  "exact": 0.7662337662337663,
+  "taken95": 0.7012987012987013,
+  "wrong95": 1,
+  "taken80": 0.8051948051948052,
+  "wrong80": 5,
+  "read_ms": 3.350682259732313
+ },
+ "new224 | straight | v4 | corners, then read": {
+  "exact": 0.7792207792207793,
+  "taken95": 0.7142857142857143,
+  "wrong95": 2,
+  "taken80": 0.7922077922077922,
+  "wrong80": 3,
+  "read_ms": 3.504575155838884
+ },
+ "new224 | straight | v4 | read, then corners if unsure": {
+  "exact": 0.7922077922077922,
+  "taken95": 0.7402597402597403,
+  "wrong95": 3,
+  "taken80": 0.8571428571428571,
+  "wrong80": 6,
+  "read_ms": 3.549934727283022
+ },
+ "new224 | turned 20-50 deg | v4 | now: read, then tilt/lean if unsure": {
+  "exact": 0.6753246753246753,
+  "taken95": 0.5454545454545454,
+  "wrong95": 1,
+  "taken80": 0.6753246753246753,
+  "wrong80": 4,
+  "read_ms": 3.6154247921910034
+ },
+ "new224 | turned 20-50 deg | v4 | corners, then read": {
+  "exact": 0.7532467532467533,
+  "taken95": 0.6623376623376623,
+  "wrong95": 1,
+  "taken80": 0.7792207792207793,
+  "wrong80": 4,
+  "read_ms": 3.519997233761151
+ },
+ "new224 | turned 20-50 deg | v4 | read, then corners if unsure": {
+  "exact": 0.7662337662337663,
+  "taken95": 0.7012987012987013,
+  "wrong95": 2,
+  "taken80": 0.7922077922077922,
+  "wrong80": 4,
+  "read_ms": 3.725520909088059
+ }
+}

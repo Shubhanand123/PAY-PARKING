@@ -1,0 +1,70 @@
+added extra.csv 386
+added self.csv 1466
+added npds.csv 4206
+added iurs.csv 960
+added hrlr.csv 3606
+added hfgam.csv 20
+real train 13149 synthetic 30223 val 500 test 163
+val parts: plain 0.920 | straightened 0.876 | turned+straightened 0.890
+before training: val 0.895 test 0.902
+val parts: plain 0.902 | straightened 0.854 | turned+straightened 0.886
+epoch 1/30 loss 0.305 train-acc 0.820 val-acc 0.881 best 0.895 23:05:58
+val parts: plain 0.902 | straightened 0.876 | turned+straightened 0.874
+epoch 2/30 loss 0.288 train-acc 0.830 val-acc 0.884 best 0.895 23:06:23
+val parts: plain 0.906 | straightened 0.856 | turned+straightened 0.880
+epoch 3/30 loss 0.283 train-acc 0.835 val-acc 0.881 best 0.895 23:06:48
+val parts: plain 0.906 | straightened 0.864 | turned+straightened 0.876
+epoch 4/30 loss 0.278 train-acc 0.841 val-acc 0.882 best 0.895 23:07:12
+val parts: plain 0.908 | straightened 0.860 | turned+straightened 0.876
+epoch 5/30 loss 0.273 train-acc 0.843 val-acc 0.881 best 0.895 23:07:38
+val parts: plain 0.898 | straightened 0.872 | turned+straightened 0.868
+epoch 6/30 loss 0.274 train-acc 0.844 val-acc 0.879 best 0.895 23:08:03
+val parts: plain 0.898 | straightened 0.858 | turned+straightened 0.870
+epoch 7/30 loss 0.270 train-acc 0.847 val-acc 0.875 best 0.895 23:08:30
+val parts: plain 0.908 | straightened 0.860 | turned+straightened 0.886
+epoch 8/30 loss 0.272 train-acc 0.843 val-acc 0.885 best 0.895 23:08:57
+val parts: plain 0.906 | straightened 0.864 | turned+straightened 0.878
+epoch 9/30 loss 0.268 train-acc 0.849 val-acc 0.883 best 0.895 23:09:23
+val parts: plain 0.896 | straightened 0.860 | turned+straightened 0.874
+epoch 10/30 loss 0.266 train-acc 0.851 val-acc 0.877 best 0.895 23:09:47
+val parts: plain 0.900 | straightened 0.854 | turned+straightened 0.886
+epoch 11/30 loss 0.266 train-acc 0.853 val-acc 0.880 best 0.895 23:10:12
+val parts: plain 0.900 | straightened 0.864 | turned+straightened 0.876
+epoch 12/30 loss 0.264 train-acc 0.853 val-acc 0.880 best 0.895 23:10:37
+val parts: plain 0.902 | straightened 0.858 | turned+straightened 0.874
+epoch 13/30 loss 0.263 train-acc 0.853 val-acc 0.878 best 0.895 23:11:01
+val parts: plain 0.902 | straightened 0.868 | turned+straightened 0.882
+epoch 14/30 loss 0.263 train-acc 0.856 val-acc 0.884 best 0.895 23:11:25
+val parts: plain 0.898 | straightened 0.860 | turned+straightened 0.880
+epoch 15/30 loss 0.260 train-acc 0.858 val-acc 0.879 best 0.895 23:11:50
+val parts: plain 0.902 | straightened 0.872 | turned+straightened 0.878
+epoch 16/30 loss 0.261 train-acc 0.857 val-acc 0.884 best 0.895 23:12:15
+val parts: plain 0.908 | straightened 0.872 | turned+straightened 0.880
+epoch 17/30 loss 0.258 train-acc 0.860 val-acc 0.887 best 0.895 23:12:39
+val parts: plain 0.906 | straightened 0.868 | turned+straightened 0.874
+epoch 18/30 loss 0.259 train-acc 0.860 val-acc 0.883 best 0.895 23:13:05
+val parts: plain 0.908 | straightened 0.862 | turned+straightened 0.874
+epoch 19/30 loss 0.259 train-acc 0.858 val-acc 0.881 best 0.895 23:13:34
+val parts: plain 0.908 | straightened 0.870 | turned+straightened 0.878
+epoch 20/30 loss 0.257 train-acc 0.862 val-acc 0.885 best 0.895 23:14:04
+val parts: plain 0.904 | straightened 0.872 | turned+straightened 0.876
+epoch 21/30 loss 0.257 train-acc 0.861 val-acc 0.884 best 0.895 23:14:32
+val parts: plain 0.904 | straightened 0.870 | turned+straightened 0.878
+epoch 22/30 loss 0.256 train-acc 0.865 val-acc 0.884 best 0.895 23:15:07
+val parts: plain 0.904 | straightened 0.870 | turned+straightened 0.888
+epoch 23/30 loss 0.256 train-acc 0.863 val-acc 0.887 best 0.895 23:15:42
+val parts: plain 0.906 | straightened 0.872 | turned+straightened 0.882
+epoch 24/30 loss 0.256 train-acc 0.864 val-acc 0.887 best 0.895 23:16:16
+val parts: plain 0.908 | straightened 0.872 | turned+straightened 0.882
+epoch 25/30 loss 0.255 train-acc 0.864 val-acc 0.887 best 0.895 23:16:50
+val parts: plain 0.906 | straightened 0.866 | turned+straightened 0.888
+epoch 26/30 loss 0.257 train-acc 0.864 val-acc 0.887 best 0.895 23:17:26
+val parts: plain 0.908 | straightened 0.868 | turned+straightened 0.888
+epoch 27/30 loss 0.254 train-acc 0.865 val-acc 0.888 best 0.895 23:18:01
+val parts: plain 0.908 | straightened 0.868 | turned+straightened 0.888
+epoch 28/30 loss 0.255 train-acc 0.864 val-acc 0.888 best 0.895 23:18:35
+val parts: plain 0.906 | straightened 0.868 | turned+straightened 0.886
+epoch 29/30 loss 0.254 train-acc 0.866 val-acc 0.887 best 0.895 23:19:08
+val parts: plain 0.906 | straightened 0.872 | turned+straightened 0.888
+epoch 30/30 loss 0.255 train-acc 0.864 val-acc 0.889 best 0.895 23:19:38
+FINAL no epoch beat the starting model: nothing saved

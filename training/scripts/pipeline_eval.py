@@ -66,6 +66,8 @@ def surer(a, b):  # the app keeps the second reading only if it is a valid plate
 j = json.load(open(os.path.join(DET, 'annotations', 'test.json'))); ims = {i['id']: i for i in j['images']}
 plates = [(os.path.join(DET, 'test', ims[a['image_id']]['file_name']), np.array(a['bbox'], np.float32), a['text']) for a in j['annotations']
           if ims[a['image_id']]['source'] == 'payals' and valid(a.get('text', ''))]
+if os.environ.get('UNSEEN_ONLY'):  # only plates whose number is not in this training list (same vehicle, other photo)
+    import csv; seen = {r['plate_text'] for r in csv.DictReader(open(os.environ['UNSEEN_ONLY']))}; plates = [p for p in plates if p[2] not in seen]
 random.seed(11); views = {'straight': [], 'turned 20-50 deg': []}
 for path, (x, y, w, h), text in plates:
     im = cv2.imread(path); q = np.float32([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]); views['straight'].append((im, text))

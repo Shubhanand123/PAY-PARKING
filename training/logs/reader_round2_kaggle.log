@@ -1,0 +1,30 @@
+added extra.csv 386
+added self.csv 1466
+added npds.csv 4206
+added iurs.csv 960
+added hrlr.csv 3606
+added hfgam.csv 20
+added kaggle.csv 15987
+real train 29136 synthetic 30223 val 500 test 163
+val parts: plain 0.920 | straightened 0.876 | turned+straightened 0.890
+before training: val 0.895 test 0.902
+val parts: plain 0.888 | straightened 0.860 | turned+straightened 0.860
+epoch 1/30 loss 0.513 train-acc 0.641 val-acc 0.869 best 0.895 22:41:45
+val parts: plain 0.876 | straightened 0.832 | turned+straightened 0.860
+epoch 2/30 loss 0.425 train-acc 0.694 val-acc 0.856 best 0.895 22:42:55
+val parts: plain 0.874 | straightened 0.838 | turned+straightened 0.856
+epoch 3/30 loss 0.400 train-acc 0.713 val-acc 0.856 best 0.895 22:44:06
+val parts: plain 0.878 | straightened 0.844 | turned+straightened 0.850
+epoch 4/30 loss 0.384 train-acc 0.724 val-acc 0.857 best 0.895 22:45:12
+val parts: plain 0.878 | straightened 0.834 | turned+straightened 0.842
+epoch 5/30 loss 0.373 train-acc 0.732 val-acc 0.851 best 0.895 22:46:23
+val parts: plain 0.880 | straightened 0.826 | turned+straightened 0.834
+epoch 6/30 loss 0.367 train-acc 0.738 val-acc 0.847 best 0.895 22:47:33
+val parts: plain 0.870 | straightened 0.828 | turned+straightened 0.854
+epoch 7/30 loss 0.359 train-acc 0.746 val-acc 0.851 best 0.895 22:48:41
+val parts: plain 0.880 | straightened 0.818 | turned+straightened 0.844
+epoch 8/30 loss 0.354 train-acc 0.750 val-acc 0.847 best 0.895 22:49:46
+val parts: plain 0.870 | straightened 0.824 | turned+straightened 0.848
+epoch 9/30 loss 0.351 train-acc 0.752 val-acc 0.847 best 0.895 22:50:55
+val parts: plain 0.872 | straightened 0.824 | turned+straightened 0.844
+epoch 10/30 loss 0.346 train-acc 0.757 val-acc 0.847 best 0.895 22:52:02

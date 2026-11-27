@@ -5,7 +5,8 @@ Moved here from a session scratchpad so new sessions can continue.
 ## Models
 - `models/reader_v4.keras` / `.onnx`: the reader in the app since 3.9 (fp16 copy in `android/app/src/main/assets/models/plate_reader_in.onnx`).
   Unseen test (163 plates): 90.8% exact; at 80% sure: used on 87%, right 141/142. Val 92.6%.
-- Plate finder: `android/app/src/main/assets/models/plate_finder_256.onnx` (YOLOv9-t 256, MIT, open-image-models).
+- Plate finder (app 3.12+): `android/app/src/main/assets/models/plate_finder_224.onnx` = `models/finder_yolox224.onnx` (YOLOX-nano 224, Apache-2.0). Old: YOLOv9-t 256 (open-image-models, MIT; in git history).
+- 4-corner model (app 3.12+): `plate_corners.onnx` = `models/corners_v1.onnx` (MobileNetV3-small, 160 x 80 grown box -> 4 corners).
 - Base model for training from scratch: fast-plate-ocr `cct_xs_v2_global` (MIT), downloaded by `prep.py`.
 
 ## Data (all business-safe licences) — rebuild images with the scripts, labels are in `labels/`
@@ -46,3 +47,28 @@ tar xzf training/data/nolicence_plates.tgz -C <anpr>/ocrdata
 ```bash
 cat training/data/kaggle.tgz.part* | tar xzf - -C <anpr>/ocrdata
 ```
+
+
+## Night of 27 Nov 2026 (RTX 4090, Runpod) — results
+Scripts: `det_prep.py` (photos with boxes/corners), `yolox_train.py` + `finder_eval.py`, `corner_train.py` + `corner_export.py`,
+`train.py` (new: `STRAIGHT`, `CORNER_ERR`, `SELECT=mix`), `pipeline_eval.py` (whole chain), `night6.sh` + `pod_boot.sh` (pod job, no SSH).
+
+| | old | new |
+|---|---|---|
+| Finder, 163 test plates: found / tight box (IoU>=0.7) | 95.7% / 79.3% | **98.8% / 95.7%** |
+| Finder, all 1,207 test photos: found | 83.2% | **95.5%** |
+| Finder CPU time, 1 thread | 15.5 ms | **6.0 ms** |
+| Whole chain, 154 test plates on photos, straight: exact | 72.7% | **81.8%** |
+| Whole chain, turned 20-50 deg: exact | 60.4% | **76.0%** |
+| Whole chain, wrong when 95%+ sure (straight / turned) | 1 / 1 | 2 / 2 |
+| Same, only the 77 test plates whose number is not in train.csv: exact straight / turned | 72.7% / 67.5% | **77.9% / 75.3%** |
+
+Corner model: mean corner error on hand-labelled real plates 2.2% of plate width (2.4% turned 20-50 deg); the plain box is 7.1% / 10.1%.
+Stage 2 (pseudo-corners) was not kept: more sure-but-wrong readings in the chain.
+
+Reader: v4 stays. Three retrains on corner-straightened crops did not beat it (val: plain / straightened / turned+straightened,
+v4 = 0.920 / 0.876 / 0.890): round 1 (HR-LR, plain selection) best plain 0.916; round 2 (+ Kaggle, stopped at epoch 10) mixed 0.869;
+round 3 (no Kaggle, mixed selection) mixed 0.889. Logs in `logs/`. The Kaggle set made the reader worse on real photos.
+
+Note: 86 of the 163 test plates (and 322 of 500 val) have a number that is also in train.csv (same vehicle, another video
+frame), so test numbers flatter the reader; `UNSEEN_ONLY=labels/train.csv pipeline_eval.py` gives the 77 others.
