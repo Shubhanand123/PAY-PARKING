@@ -19,16 +19,19 @@ pip install -q opencv-python-headless pillow loguru thop tabulate psutil onnx py
 # reader data: real crops from the repo + synthetic plates
 mkdir -p anpr/ocrdata && cat repo/training/data/plates.tgz.part* | tar xzf - -C anpr/ocrdata || fail "plates.tgz"
 tar xzf repo/training/data/nolicence_plates.tgz -C anpr/ocrdata || fail "nolicence_plates.tgz"  # HR-LR side-angle crops (owner's decision)
+[ -n "$KAGGLE" ] && { cat repo/training/data/kaggle.tgz.part* | tar xzf - -C anpr/ocrdata || fail "kaggle.tgz"; log "Kaggle set added"; }
 cp repo/training/models/reader_v4.keras anpr/
-python -I scripts/synth.py $A/anpr/ocrdata 20000 || fail "synth"
+python -I scripts/synth.py $A/anpr/ocrdata ${SYNTH_N:-20000} || fail "synth"
 cmp <(cut -d, -f2 anpr/ocrdata/synth.csv) <(cut -d, -f2 repo/training/labels/synth.csv) && log "synthetic labels identical" || log "synthetic labels differ (fonts?)"
-# photo data for the finder and the corner model
+# photo data for the finder and the corner model (not needed for a reader-only round)
+if [ -z "$SKIP_PHOTOS" ]; then
 mkdir -p raw; get() { mkdir -p raw/$1 && curl -sL --retry 3 -o raw/$1/d.zip "$2" && (cd raw/$1 && python -m zipfile -e d.zip . && rm d.zip) || fail "download $1"; }
 get payals "$RF_PAYALS"; get merged "$RF_MERGED"; get kp1 "$RF_KP1"; get kp2 "$RF_KP2"
 get npds "https://data.mendeley.com/public-files/datasets/sxrnr7hwtk/files/dbdc1d8c-8e79-464e-920d-6e298b31bcc7/file_downloaded"
 python -I scripts/det_prep.py raw det | tee $O/det_prep.txt || fail "det_prep"
 git clone -q --depth 1 https://github.com/Megvii-BaseDetection/YOLOX yolox_src || fail "yolox clone"
 mkdir -p weights && curl -sL -o weights/yolox_nano.pth https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth || fail "yolox weights"
+fi
 log "data ready: $(du -sh det anpr | tr '\n' ' ')"
 # logs to the shared folder every minute while training
 (while true; do cp -f $A/*.log $O/ 2>/dev/null; sleep 60; done) &

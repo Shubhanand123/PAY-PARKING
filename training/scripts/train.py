@@ -38,11 +38,11 @@ def turn(im, q, yaw, pitch, roll, f_mult=1.6):
     qq = cv2.perspectiveTransform(q[None].astype(np.float64), Hm)[0]
     return out, qq.astype(np.float32)
 MX, MY = 0.05, 0.10  # plate edges inside the reader's 128 x 64 picture (also used by the app when it warps from corners)
-def straightened(x2):
+def straightened(x2, turned=None):
     # x2: a real plate at 256 x 128. Turned to a side angle, then warped flat from slightly wrong corners -> 128 x 64.
     h, w = x2.shape[:2]; q = np.float32([[MX * w, MY * h], [(1 - MX) * w, MY * h], [(1 - MX) * w, (1 - MY) * h], [MX * w, (1 - MY) * h]])
     x2 = cv2.copyMakeBorder(x2, h // 2, h // 2, w // 2, w // 2, cv2.BORDER_REFLECT); q = q + [w // 2, h // 2]  # room to turn
-    if random.random() < 0.85: x2, q = turn(x2, q, random.choice([-1, 1]) * random.uniform(5, 55), random.uniform(-15, 15), random.uniform(-10, 10), random.uniform(1.0, 2.5))
+    if (random.random() < 0.85) if turned is None else turned: x2, q = turn(x2, q, random.choice([-1, 1]) * random.uniform(5, 55), random.uniform(-15, 15), random.uniform(-10, 10), random.uniform(1.0, 2.5))
     pw = np.linalg.norm(q[1] - q[0]); q = q + np.random.normal(0, CORNER_ERR * pw, q.shape)
     dst = np.float32([[MX * W, MY * H], [(1 - MX) * W, MY * H], [(1 - MX) * W, (1 - MY) * H], [MX * W, (1 - MY) * H]])
     return cv2.warpPerspective(x2, cv2.getPerspectiveTransform(q.astype(np.float32), dst), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
@@ -78,6 +78,17 @@ class Batches(keras.utils.PyDataset):
         part = self.idx[b * self.bs:(b + 1) * self.bs]
         x = np.stack([augment(Xr[i] if k == 'r' else Xs[i]) for k, i in part]); y = np.stack([Yr[i] if k == 'r' else Ys[i] for k, i in part])
         return x, y
+# SELECT=mix: the best model is chosen on val crops as the app gives them with the 4-corner model: plain, straightened
+# (straight-on plate, corner error only) and turned 20-55 deg then straightened; the score is the mean of the three.
+VAL_SETS = [('plain', None)]
+if os.environ.get('SELECT') == 'mix':
+    Xv2, _, _ = load('val.csv', 2); random.seed(5); np.random.seed(5)
+    VAL_SETS += [('straightened', np.stack([straightened(x, False) for x in Xv2])), ('turned+straightened', np.stack([straightened(x, True) for x in Xv2]))]
+    del Xv2; random.seed(1); np.random.seed(1)
+def vscore(show=False):
+    parts = [score(Xv if X is None else X, Tv) for _, X in VAL_SETS]
+    if show: print('val parts:', ' | '.join(f'{n} {p:.3f}' for (n, _), p in zip(VAL_SETS, parts)), flush=True)
+    return float(np.mean(parts))
 RESUME = os.environ.get('RESUME', os.path.join(A, 'resume_from.keras'))
 if os.path.exists(RESUME):  # continue from the best model so far (training was interrupted)
     model = keras.models.load_model(RESUME, compile=False)
@@ -102,18 +113,20 @@ if os.path.exists(LAST) and os.path.exists(LASTJ):
     start_val, best = st['start_val'], st['best']
     print(f'continuing the interrupted run at epoch {first + 1}/{EPOCHS}, best so far {best:.3f}', flush=True)
 else:
-    start_val = score(Xv, Tv)
+    start_val = vscore(True)
     print('before training: val', round(start_val, 3), 'test', round(score(Xt, Tt), 3), flush=True)
     best = start_val if os.path.exists(RESUME) else 0  # a resumed run only saves when it beats where it started
 class Report(keras.callbacks.Callback):
     def on_epoch_end(self, ep, logs=None):
         global best
-        v = score(Xv, Tv)
+        v = vscore(True)
         if v > best: best = v; self.model.save(os.path.join(A, os.environ.get('OUT', 'best_reader.keras')))
         self.model.save(LAST); json.dump({'epoch': ep + 1, 'best': best, 'start_val': start_val}, open(LASTJ, 'w'))
         print(f'epoch {ep + 1}/{EPOCHS} loss {logs["loss"]:.3f} train-acc {logs["plate_acc"]:.3f} val-acc {v:.3f} best {best:.3f} {time.strftime("%H:%M:%S")}', flush=True)
 model.fit(data, epochs=EPOCHS, initial_epoch=first, callbacks=[Report()], verbose=0)
 for f in (LAST, LASTJ):
     if os.path.exists(f): os.remove(f)  # run finished
+if not os.path.exists(os.path.join(A, os.environ.get('OUT', 'best_reader.keras'))):
+    print('FINAL no epoch beat the starting model: nothing saved', flush=True); raise SystemExit(0)
 model = keras.models.load_model(os.path.join(A, os.environ.get('OUT', 'best_reader.keras')), compile=False, custom_objects={'plate_acc': plate_acc})
-print('FINAL best model: val', round(score(Xv, Tv), 3), 'test (never seen)', round(score(Xt, Tt), 3), flush=True)
+print('FINAL best model: val', round(vscore(True), 3), 'test (never seen)', round(score(Xt, Tt), 3), flush=True)

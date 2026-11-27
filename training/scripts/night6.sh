@@ -13,8 +13,10 @@ $A/tfenv/bin/python -c "import tensorflow as tf; print('tf gpus', tf.config.list
 $A/tfenv/bin/python -c "from fast_plate_ocr.train.model import layers; import onnxruntime; print('reader packages ok')" 2>&1 | tail -1 | tee -a night.log
 NC=$(nproc); log "cpus $NC"
 log "(a) finder + (b) corners stage 1"
+if [ -z "$SKIP_FINDER" ]; then
 YOLOX_SRC=$A/yolox_src WEIGHTS=$A/weights/yolox_nano.pth BS=64 WORKERS=$((NC / 2)) python -u $P/yolox_train.py $A/det $A/runs/finder ${FINDER_EPOCHS:-150} > finder.log 2>&1 &
 FP=$!
+else log "finder: not in this round"; FP=; fi
 if [ -n "$SKIP_CORNERS" ]; then log "corner model trained elsewhere: skipped here"; else
 BS=128 WORKERS=$((NC / 2)) PER_EPOCH=40000 python -u $P/corner_train.py $A/det $A/runs/corners1 ${CORNER_EPOCHS:-25} > corners1.log 2>&1 || log "corners stage 1 FAILED"
 log "corners stage 1 done: $(tail -2 corners1.log | head -1)"
@@ -29,8 +31,8 @@ E
 )
 log "corner error used for reader practice: ${ERR:-0.03}"
 log "(c) reader on straightened crops, from v4"
-cd $A/anpr && TF_FORCE_GPU_ALLOW_GROWTH=true STRAIGHT=0.5 CORNER_ERR=${ERR:-0.03} RESUME=$A/anpr/reader_v4.keras OUT=reader_v5.keras PEAK_LR=2e-4 \
+cd $A/anpr && TF_FORCE_GPU_ALLOW_GROWTH=true STRAIGHT=0.5 CORNER_ERR=${ERR:-0.03} RESUME=$A/anpr/reader_v4.keras OUT=reader_v5.keras PEAK_LR=${READER_LR:-2e-4} \
   $A/tfenv/bin/python -u $P/train.py $A/anpr ${READER_EPOCHS:-20} > $A/reader.log 2>&1 || log "reader FAILED"
 cd $A; log "reader done: $(grep FINAL reader.log)"
-wait $FP || log "finder FAILED"; log "finder done: $(grep '^epoch' finder.log | tail -1)"
+[ -n "$FP" ] && { wait $FP || log "finder FAILED"; log "finder done: $(grep '^epoch' finder.log | tail -1)"; }
 log "ALL DONE"
