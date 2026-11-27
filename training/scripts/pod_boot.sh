@@ -6,7 +6,7 @@ A=/workspace; O=$A/out; mkdir -p $O; cd $A
 exec > >(tee -a $O/boot.log) 2>&1
 (cd $O && python -m http.server 8000 >/dev/null 2>&1 &)
 log() { echo "$(date +%H:%M:%S) $*"; }
-fail() { log "FAILED: $*"; touch $O/FAILED; sleep 10800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
+fail() { log "FAILED: $*"; touch $O/FAILED; sleep 1800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
 log "boot, commit $REPO_COMMIT"
 apt-get update -qq >/dev/null && apt-get install -y -qq fonts-dejavu-core fonts-liberation >/dev/null || log "fonts install failed"
 git clone -q https://github.com/Shubhanand123/pay-parking repo && git -C repo checkout -q $REPO_COMMIT || fail "clone"
@@ -19,7 +19,7 @@ cp repo/training/models/reader_v4.keras anpr/
 python -I scripts/synth.py $A/anpr/ocrdata 20000 || fail "synth"
 cmp <(cut -d, -f2 anpr/ocrdata/synth.csv) <(cut -d, -f2 repo/training/labels/synth.csv) && log "synthetic labels identical" || log "synthetic labels differ (fonts?)"
 # photo data for the finder and the corner model
-mkdir -p raw; get() { mkdir -p raw/$1 && curl -sL --retry 3 -o raw/$1/d.zip "$2" && (cd raw/$1 && unzip -qo d.zip && rm d.zip) || fail "download $1"; }
+mkdir -p raw; get() { mkdir -p raw/$1 && curl -sL --retry 3 -o raw/$1/d.zip "$2" && (cd raw/$1 && python -m zipfile -e d.zip . && rm d.zip) || fail "download $1"; }
 get payals "$RF_PAYALS"; get merged "$RF_MERGED"; get kp1 "$RF_KP1"; get kp2 "$RF_KP2"
 get npds "https://data.mendeley.com/public-files/datasets/sxrnr7hwtk/files/dbdc1d8c-8e79-464e-920d-6e298b31bcc7/file_downloaded"
 python -I scripts/det_prep.py raw det | tee $O/det_prep.txt || fail "det_prep"
