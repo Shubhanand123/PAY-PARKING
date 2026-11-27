@@ -1,0 +1,37 @@
+#!/bin/bash
+# Runs by itself when the Runpod pod starts (pod start command, pinned to a commit of this repo). No SSH needed:
+# builds the data, trains with night6.sh, and shares only /workspace/out (logs + trained models) read-only on port 8000.
+# Env (set on the pod): REPO_COMMIT, RF_PAYALS, RF_MERGED, RF_KP1, RF_KP2 (Roboflow export download links, CC BY 4.0 sets).
+A=/workspace; O=$A/out; mkdir -p $O; cd $A
+exec > >(tee -a $O/boot.log) 2>&1
+(cd $O && python -m http.server 8000 >/dev/null 2>&1 &)
+log() { echo "$(date +%H:%M:%S) $*"; }
+fail() { log "FAILED: $*"; touch $O/FAILED; sleep 10800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
+log "boot, commit $REPO_COMMIT"
+apt-get update -qq >/dev/null && apt-get install -y -qq fonts-dejavu-core fonts-liberation >/dev/null || log "fonts install failed"
+git clone -q https://github.com/Shubhanand123/pay-parking repo && git -C repo checkout -q $REPO_COMMIT || fail "clone"
+cp -r repo/training/scripts $A/scripts
+pip install -q opencv-python-headless pillow loguru thop tabulate psutil onnx pycocotools > $A/pip.log 2>&1 || fail "pip"
+# reader data: real crops from the repo + synthetic plates
+mkdir -p anpr/ocrdata && cat repo/training/data/plates.tgz.part* | tar xzf - -C anpr/ocrdata || fail "plates.tgz"
+cp repo/training/models/reader_v4.keras anpr/
+python -I scripts/synth.py $A/anpr/ocrdata 20000 || fail "synth"
+cmp <(cut -d, -f2 anpr/ocrdata/synth.csv) <(cut -d, -f2 repo/training/labels/synth.csv) && log "synthetic labels identical" || log "synthetic labels differ (fonts?)"
+# photo data for the finder and the corner model
+mkdir -p raw; get() { mkdir -p raw/$1 && curl -sL --retry 3 -o raw/$1/d.zip "$2" && (cd raw/$1 && unzip -qo d.zip && rm d.zip) || fail "download $1"; }
+get payals "$RF_PAYALS"; get merged "$RF_MERGED"; get kp1 "$RF_KP1"; get kp2 "$RF_KP2"
+get npds "https://data.mendeley.com/public-files/datasets/sxrnr7hwtk/files/dbdc1d8c-8e79-464e-920d-6e298b31bcc7/file_downloaded"
+python -I scripts/det_prep.py raw det | tee $O/det_prep.txt || fail "det_prep"
+git clone -q --depth 1 https://github.com/Megvii-BaseDetection/YOLOX yolox_src || fail "yolox clone"
+mkdir -p weights && curl -sL -o weights/yolox_nano.pth https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth || fail "yolox weights"
+log "data ready: $(du -sh det anpr | tr '\n' ' ')"
+# logs to the shared folder every minute while training
+(while true; do cp -f $A/*.log $O/ 2>/dev/null; sleep 60; done) &
+timeout 6h bash scripts/night6.sh || log "night6 ended with an error or after 6 h"
+cp -f $A/*.log $O/
+cp -f runs/finder/finder_best.pt runs/corners1/corners_best.pt $O/ 2>/dev/null; cp -f runs/corners2/corners_best.pt $O/corners2_best.pt 2>/dev/null
+cp -f anpr/reader_v5.keras $O/ 2>/dev/null
+grep -q "ALL DONE" $A/night.log && touch $O/DONE || touch $O/FAILED
+log "finished; files in out: $(ls $O | tr '\n' ' ')"
+# safety: if nobody deletes the pod within 3 hours, stop it
+sleep 10800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID

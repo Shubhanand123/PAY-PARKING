@@ -1,27 +1,53 @@
 # Fine-tunes the pre-trained fast-plate-ocr CCT-XS reader (MIT) on Indian plates: real crops (CC BY 4.0) + synthetic.
-import os, json, sys, csv, random, time, numpy as np, cv2
+import os, json, sys, csv, random, time, math, numpy as np, cv2
 os.environ['KERAS_BACKEND'] = 'tensorflow'; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import keras, tensorflow as tf
 from fast_plate_ocr.train.model import layers  # noqa: F401 (custom layers for loading)
 A = sys.argv[1]; D = os.path.join(A, 'ocrdata'); EPOCHS = int(sys.argv[2]) if len(sys.argv) > 2 else 40
 ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_'; SLOTS = 10; H, W = 64, 128
 random.seed(1); np.random.seed(1); tf.random.set_seed(1)
-def load(csvname):
+# STRAIGHT=p: share of real plates shown as the app's 4-corner model would hand them over (turned in 3D, then warped flat
+# from corners with CORNER_ERR error, as a fraction of plate width). Needs the 256 x 128 pictures, so real plates load at 2x.
+STRAIGHT = float(os.environ.get('STRAIGHT', 0)); CORNER_ERR = float(os.environ.get('CORNER_ERR', 0.03)); HI = 2 if STRAIGHT else 1
+def load(csvname, hi=1):
     rows = list(csv.DictReader(open(os.path.join(D, csvname))))
-    X = np.zeros((len(rows), H, W, 3), np.uint8); Y = np.zeros((len(rows), SLOTS, len(ALPHA)), np.float32); T = []
+    X = np.zeros((len(rows), H * hi, W * hi, 3), np.uint8); Y = np.zeros((len(rows), SLOTS, len(ALPHA)), np.float32); T = []
     for i, r in enumerate(rows):
         im = cv2.imread(os.path.join(D, r['image_path']))
-        X[i] = cv2.resize(cv2.cvtColor(im, cv2.COLOR_BGR2RGB), (W, H), interpolation=cv2.INTER_LINEAR)
+        X[i] = cv2.resize(cv2.cvtColor(im, cv2.COLOR_BGR2RGB), (W * hi, H * hi), interpolation=cv2.INTER_AREA if hi == 1 and im.shape[1] > W else cv2.INTER_LINEAR)
         t = r['plate_text'].ljust(SLOTS, '_'); T.append(r['plate_text'])
         for j, ch in enumerate(t): Y[i, j, ALPHA.index(ch)] = 1
     return X, Y, T
-Xr, Yr, _ = load('train.csv'); Xs, Ys, _ = load('synth.csv')
+Xr, Yr, _ = load('train.csv', HI); Xs, Ys, _ = load('synth.csv')
 # more real Indian plates: character-labelled sets and self-labelled plates (if present)
 for extra in ('extra.csv', 'self.csv', 'npds.csv', 'iurs.csv'):
     if os.path.exists(os.path.join(D, extra)):
-        Xe, Ye, _ = load(extra); Xr = np.concatenate([Xr, Xe]); Yr = np.concatenate([Yr, Ye]); print('added', extra, len(Xe), flush=True); Xv, Yv, Tv = load('val.csv'); Xt, Yt, Tt = load('test.csv')
+        Xe, Ye, _ = load(extra, HI); Xr = np.concatenate([Xr, Xe]); Yr = np.concatenate([Yr, Ye]); print('added', extra, len(Xe), flush=True); Xv, Yv, Tv = load('val.csv'); Xt, Yt, Tt = load('test.csv')
 print('real train', len(Xr), 'synthetic', len(Xs), 'val', len(Xv), 'test', len(Xt), flush=True)
+def turn(im, q, yaw, pitch, roll, f_mult=1.6):
+    """The plate (and the scene around it, as if flat) turned in 3D about the plate centre, seen by a camera at distance
+    f = f_mult * picture size: near side larger, far side smaller and narrower (real side-angle view)."""
+    h, w = im.shape[:2]; c = q.mean(0); f = f_mult * max(w, h)
+    ry, rp, rr = map(np.radians, (yaw, pitch, roll))
+    Ry = np.array([[np.cos(ry), 0, np.sin(ry)], [0, 1, 0], [-np.sin(ry), 0, np.cos(ry)]])
+    Rx = np.array([[1, 0, 0], [0, np.cos(rp), -np.sin(rp)], [0, np.sin(rp), np.cos(rp)]])
+    Rz = np.array([[np.cos(rr), -np.sin(rr), 0], [np.sin(rr), np.cos(rr), 0], [0, 0, 1]])
+    R = Rz @ Rx @ Ry; K = np.array([[f, 0, c[0]], [0, f, c[1]], [0, 0, 1]])
+    Hm = K @ np.column_stack([R[:, 0], R[:, 1], [0, 0, f]]) @ np.array([[1, 0, -c[0]], [0, 1, -c[1]], [0, 0, 1]])
+    out = cv2.warpPerspective(im, Hm, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    qq = cv2.perspectiveTransform(q[None].astype(np.float64), Hm)[0]
+    return out, qq.astype(np.float32)
+MX, MY = 0.05, 0.10  # plate edges inside the reader's 128 x 64 picture (also used by the app when it warps from corners)
+def straightened(x2):
+    # x2: a real plate at 256 x 128. Turned to a side angle, then warped flat from slightly wrong corners -> 128 x 64.
+    h, w = x2.shape[:2]; q = np.float32([[MX * w, MY * h], [(1 - MX) * w, MY * h], [(1 - MX) * w, (1 - MY) * h], [MX * w, (1 - MY) * h]])
+    x2 = cv2.copyMakeBorder(x2, h // 2, h // 2, w // 2, w // 2, cv2.BORDER_REFLECT); q = q + [w // 2, h // 2]  # room to turn
+    if random.random() < 0.85: x2, q = turn(x2, q, random.choice([-1, 1]) * random.uniform(5, 55), random.uniform(-15, 15), random.uniform(-10, 10), random.uniform(1.0, 2.5))
+    pw = np.linalg.norm(q[1] - q[0]); q = q + np.random.normal(0, CORNER_ERR * pw, q.shape)
+    dst = np.float32([[MX * W, MY * H], [(1 - MX) * W, MY * H], [(1 - MX) * W, (1 - MY) * H], [MX * W, (1 - MY) * H]])
+    return cv2.warpPerspective(x2, cv2.getPerspectiveTransform(q.astype(np.float32), dst), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 def augment(x):
+    if x.shape[0] != H: x = straightened(x) if random.random() < STRAIGHT else cv2.resize(x, (W, H), interpolation=cv2.INTER_AREA)
     x = x.astype(np.float32)
     if random.random() < 0.8: x = x * random.uniform(0.6, 1.35) + random.uniform(-35, 35)
     if random.random() < 0.3: x = cv2.GaussianBlur(x, (0, 0), random.uniform(0.3, 1.2))
@@ -46,7 +72,7 @@ class Batches(keras.utils.PyDataset):
     def on_epoch_end(self):
         # every epoch: all real plates x3 (they matter most) + 12,000 random synthetic ones
         idx = [('r', i) for i in range(len(Xr))] * 3 + [('s', i) for i in random.sample(range(len(Xs)), min(int(os.environ.get('SYNTH', 12000)), len(Xs)))]
-        random.shuffle(idx); self.idx = idx
+        random.shuffle(idx); self.idx = idx[:int(os.environ['SMOKE'])] if os.environ.get('SMOKE') else idx
     def __len__(self): return len(self.idx) // self.bs
     def __getitem__(self, b):
         part = self.idx[b * self.bs:(b + 1) * self.bs]
