@@ -153,7 +153,7 @@ public class PlateScanActivity extends AppCompatActivity {
         buttons.setPadding(0, dp(12), 0, 0);
         light = button("Light off");
         light.setVisibility(View.GONE);
-        light.setOnClickListener(v -> toggleTorch());
+        light.setOnClickListener(v -> { torchByHand = true; toggleTorch(); });
         Button manual = button("Type manually");
         manual.setOnClickListener(v -> cancel());
         buttons.addView(light);
@@ -257,6 +257,7 @@ public class PlateScanActivity extends AppCompatActivity {
             frame.close(); return;
         }
         frame.close(); // free the camera straight away for the next picture
+        autoLight(raw);
         framesSeen++;
         boolean sideways = rotation == 90 || rotation == 270;
         int uw = sideways ? raw.getHeight() : raw.getWidth(), uh = sideways ? raw.getWidth() : raw.getHeight();
@@ -270,6 +271,7 @@ public class PlateScanActivity extends AppCompatActivity {
                 boolean reuse = (framesSeen % 2 == 0) && lastBox != null && System.currentTimeMillis() - lastBoxAt < 200;
                 Rect box = reuse ? lastBox : finder.find(raw, rotation);
                 if (!reuse) { lastBox = box; lastBoxAt = System.currentTimeMillis(); }
+                if (box != null && !reuse) focusOnPlate(box, rotation, raw.getWidth(), raw.getHeight());
                 if (box != null) {
                     int mx = Math.round(box.width() * 0.12f), my = Math.round(box.height() * 0.35f);
                     Rect grown = new Rect(Math.max(0, box.left - mx), Math.max(0, box.top - my), Math.min(uw, box.right + mx), Math.min(uh, box.bottom + my));
@@ -441,6 +443,42 @@ public class PlateScanActivity extends AppCompatActivity {
                 new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(x, y))
                 .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS).build());
         } catch (Throwable ignored) { /* the camera keeps its own focus */ }
+    }
+
+    // Auto focus on the plate: when the finder boxes a plate, focus and expose on that box (at most every 1.2 s,
+    // and only when the plate moved), instead of the middle of the picture.
+    private volatile long plateFocusAt; private volatile float lastFx = -1, lastFy = -1;
+    private void focusOnPlate(Rect upright, int rotation, int rawW, int rawH) {
+        long now = System.currentTimeMillis();
+        if (camera == null || now - plateFocusAt < 1200) return;
+        Rect r = toRaw(upright, rotation, rawW, rawH);
+        float fx = r.exactCenterX() / rawW, fy = r.exactCenterY() / rawH;
+        if (Math.abs(fx - lastFx) < 0.05f && Math.abs(fy - lastFy) < 0.05f && now - plateFocusAt < 4000) return; // same spot, still sharp
+        plateFocusAt = now; lastFx = fx; lastFy = fy;
+        float size = Math.min(0.5f, Math.max(0.08f, Math.max(r.width() / (float) rawW, r.height() / (float) rawH)));
+        try {
+            camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(
+                new SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(Math.max(0f, Math.min(1f, fx)), Math.max(0f, Math.min(1f, fy)), size))
+                .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS).build());
+        } catch (Throwable ignored) { /* the camera keeps its own focus */ }
+    }
+
+    // Auto light: if the picture stays dark for 1.5 s, the torch turns on by itself (once; the Light button still works).
+    private volatile long darkSince; private volatile boolean autoLightDone, torchByHand;
+    private void autoLight(Bitmap raw) {
+        if (autoLightDone || torchByHand || camera == null || !camera.getCameraInfo().hasFlashUnit()) return;
+        int w = raw.getWidth(), h = raw.getHeight(); long sum = 0; int n = 0;
+        for (int y = h / 4; y < h * 3 / 4; y += Math.max(1, h / 16)) for (int x = w / 4; x < w * 3 / 4; x += Math.max(1, w / 16)) {
+            int p = raw.getPixel(x, y); sum += ((p >> 16) & 255) * 3 + ((p >> 8) & 255) * 6 + (p & 255); n++;
+        }
+        float mean = n == 0 ? 255 : sum / (10f * n);
+        long now = System.currentTimeMillis();
+        if (mean >= 45) { darkSince = 0; return; }
+        if (darkSince == 0) { darkSince = now; return; }
+        if (now - darkSince > 1500) {
+            autoLightDone = true;
+            main.post(() -> { if (!torchOn && !finished) toggleTorch(); });
+        }
     }
 
     private boolean shown;
