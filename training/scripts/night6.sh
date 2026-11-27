@@ -14,21 +14,22 @@ NC=$(nproc); log "cpus $NC"
 log "(a) finder + (b) corners stage 1"
 YOLOX_SRC=$A/yolox_src WEIGHTS=$A/weights/yolox_nano.pth BS=64 WORKERS=$((NC / 2)) python -u $P/yolox_train.py $A/det $A/runs/finder ${FINDER_EPOCHS:-150} > finder.log 2>&1 &
 FP=$!
+if [ -n "$SKIP_CORNERS" ]; then log "corner model trained elsewhere: skipped here"; else
 BS=128 WORKERS=$((NC / 2)) PER_EPOCH=40000 python -u $P/corner_train.py $A/det $A/runs/corners1 ${CORNER_EPOCHS:-25} > corners1.log 2>&1 || log "corners stage 1 FAILED"
 log "corners stage 1 done: $(tail -2 corners1.log | head -1)"
 PSEUDO=$A/runs/corners1/corners_best.pt BS=128 WORKERS=$((NC / 2)) PER_EPOCH=40000 python -u $P/corner_train.py $A/det $A/runs/corners2 ${CORNER_EPOCHS:-25} > corners2.log 2>&1 || log "corners stage 2 FAILED"
-log "corners stage 2 done: $(tail -2 corners2.log | head -1)"
+log "corners stage 2 done: $(tail -2 corners2.log | head -1)"; fi
 # the reader practises with the corner error measured on real hand-labelled plates turned 20-50 deg (stage 2, best epoch)
-ERR=$(python - <<'E'
+[ -n "$SKIP_CORNERS" ] && ERR=$CORNER_ERR || ERR=$(python - <<'E'
 import re
 best = min((sum(map(float, re.findall(r': ([\d.]+)% \(box', l))), float(re.findall(r'turned 20-50 deg: ([\d.]+)%', l)[0])) for l in open('corners2.log') if l.startswith('epoch'))
 print(round(best[1] / 100, 3))
 E
 )
 log "corner error used for reader practice: ${ERR:-0.03}"
-wait $FP || log "finder FAILED"; log "finder done: $(grep '^epoch' finder.log | tail -1)"
 log "(c) reader on straightened crops, from v4"
-cd $A/anpr && STRAIGHT=0.5 CORNER_ERR=${ERR:-0.03} RESUME=$A/anpr/reader_v4.keras OUT=reader_v5.keras PEAK_LR=2e-4 \
+cd $A/anpr && TF_FORCE_GPU_ALLOW_GROWTH=true STRAIGHT=0.5 CORNER_ERR=${ERR:-0.03} RESUME=$A/anpr/reader_v4.keras OUT=reader_v5.keras PEAK_LR=2e-4 \
   $A/tfenv/bin/python -u $P/train.py $A/anpr ${READER_EPOCHS:-20} > $A/reader.log 2>&1 || log "reader FAILED"
 cd $A; log "reader done: $(grep FINAL reader.log)"
+wait $FP || log "finder FAILED"; log "finder done: $(grep '^epoch' finder.log | tail -1)"
 log "ALL DONE"
