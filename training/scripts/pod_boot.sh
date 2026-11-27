@@ -8,6 +8,10 @@ exec > >(tee -a $O/boot.log) 2>&1
 log() { echo "$(date +%H:%M:%S) $*"; }
 fail() { log "FAILED: $*"; touch $O/FAILED; sleep 1800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
 log "boot, commit $REPO_COMMIT"
+# a machine whose GPU does not work would train on the CPU for hours: stop at once
+nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || true
+python -c "import torch; assert torch.cuda.is_available(); x = torch.ones(1024, 1024, device='cuda'); print('GPU ok:', torch.cuda.get_device_name(0), float((x @ x).sum()))" \
+  || { log "FAILED: GPU not usable"; touch $O/FAILED; sleep 600; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
 apt-get update -qq >/dev/null && apt-get install -y -qq fonts-dejavu-core fonts-liberation >/dev/null || log "fonts install failed"
 git clone -q https://github.com/Shubhanand123/pay-parking repo && git -C repo checkout -q $REPO_COMMIT || fail "clone"
 cp -r repo/training/scripts $A/scripts
