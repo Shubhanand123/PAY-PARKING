@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtDT, type DB, type Ticket } from './engine'
-import { COMPLAINT_TYPES, MAX_PHOTOS, SMILEYS, STATUS_LABEL, customerComplaints, validMobile, type ComplaintType } from './complaints'
+import { COMPLAINT_TYPES, MAX_PHOTOS, RETENTION_DAYS, SMILEYS, STATUS_LABEL, customerComplaints, validMobile, type ComplaintType } from './complaints'
 import * as api from './care-api'
 import './care.css'
 
@@ -113,7 +113,7 @@ function ComplaintSheet({ db, token, onClose, onDone }: { db: DB; token: string;
           <label><span className="lbl">Mobile number</span><input className="field" required inputMode="tel" autoComplete="tel" maxLength={16} value={mobile} onChange={e => setMobile(e.target.value)} placeholder="98xxxxxxxx" /></label>
         </div>
         <label className="cc-consent"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
-          <span>I agree that {s.operator} may use my name, mobile number, message and photos only to look into and reply to this complaint. They are deleted {180} days after the complaint is closed. <a href="#/privacy" target="_blank">Privacy policy</a></span></label>
+          <span>I agree that {s.operator} may use my name, mobile number, message and photos only to look into and reply to this complaint. They are deleted {RETENTION_DAYS} days after the complaint is closed. <a href="#/privacy" target="_blank">Privacy policy</a></span></label>
         {msg && <p className="cp-note bad" role="alert">{msg}</p>}
         <button className="btn btn-primary btn-xl" disabled={busy || !consent}>{busy ? 'Sending…' : 'Send complaint'}</button>
       </form>

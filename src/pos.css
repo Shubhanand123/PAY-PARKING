@@ -623,3 +623,10 @@ a, button, .btn, .cat, input, select, [role=button] { touch-action: manipulation
 .slip .slip-logo { display: block; height: 34px; width: auto; margin: 2px auto 6px; }
 .slip .slip-feedback { margin-top: 8px; padding: 6px 4px; border: 1.5px dashed currentColor; border-radius: 6px; text-align: center; font-size: .92em; line-height: 1.35; }
 .slip-print .slip-logo { height: 60px !important; }
+
+/* Test APK only (VITE_TEST_BUILD): a bar at the bottom with every screen. Not printed. */
+.test-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 900; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; justify-content: center; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: #7a1fa2; color: #fff; font-size: 13px; }
+.test-bar b { letter-spacing: .08em; background: #fff; color: #7a1fa2; padding: 1px 6px; border-radius: 4px; }
+.test-bar a { color: #fff; text-decoration: underline; }
+body:has(.test-bar) { padding-bottom: 56px; }
+@media print { .test-bar { display: none; } }

@@ -1,0 +1,37 @@
+# Builds the "PARKER TEST" APK of a work branch, so the Owner can try it before it goes live.
+# It runs on this device's own copy (no server) and installs next to the real PARKER app.
+# Nothing is published: the APK is attached to the run as a download (kept 14 days).
+name: Test APK
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21', cache: gradle }
+      - run: npm ci
+      - name: Build the site in test mode
+        run: npx tsc -b && npx vite build --mode demo
+      - name: Copy it into the Android app
+        run: CAP_BUNDLED=1 npx cap sync android
+      - name: Build the APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleTrial --no-daemon
+      - name: Name it
+        run: |
+          mkdir out
+          cp android/app/build/outputs/apk/trial/*.apk "out/PARKER-TEST-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}.apk"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PARKER-TEST-apk
+          path: out/*.apk
+          retention-days: 14

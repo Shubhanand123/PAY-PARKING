@@ -42,6 +42,13 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+        // Test copy for trying a branch before it goes live: installs next to the real app as "PARKER TEST".
+        trial {
+            initWith debug
+            applicationIdSuffix ".test"
+            versionNameSuffix "-test"
+            matchingFallbacks = ['debug']
+        }
     }
 }
 

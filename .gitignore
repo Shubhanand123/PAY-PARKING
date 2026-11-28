@@ -9,4 +9,5 @@ dist
 *.key
 
 !.env.production
+!.env.demo
 __pycache__/

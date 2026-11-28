@@ -7,7 +7,7 @@ import { PlateScanner } from './PlateScanner'
 import { warmPlateReader } from './plate-worker'
 import { differsByOneConfusableCharacter, ticketTokenFromQr } from './plate-reading'
 import { createWedgeReader } from './scanner-wedge'
-import { nativeApp, PlateReader } from './native'
+import { nativeApp, PlateReader, testBuild } from './native'
 import { cancelTicket, createEntry, logLookup, markPrinted, recordExit, takeCash } from './actions'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
@@ -52,7 +52,7 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
       {r.payments.length > 0 && <div className="slip-paid-h">PAYMENTS</div>}
       {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{paidBy(p)}</span><b>{rupees(p.amountPaise)}</b></div>)}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone, or to give feedback or raise a complaint.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
+      <div className="slip-qr-row"><TicketQR token={t.token} /><span>Scan to see this receipt on your phone, or to give feedback or raise a complaint.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
       <div className="slip-feedback"><b>Feedback or complaint?</b><br />Scan the QR above · we reply on that page</div>
       <div className="slip-foot"><b>Thank you for parking with us!</b><br />Drive safe · Issued by {r.issuedBy}</div>
     </div>
@@ -105,7 +105,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
           {t.prepaidHours > 0 && <><br />Prepaid time is not refunded; extra time is charged at exit.</>}
         </div>
       </>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to see this receipt, or to give feedback or raise a complaint.' : 'Scan to see your receipt and pay.'}</span></div>
+      <div className="slip-qr-row"><TicketQR token={t.token} /><span>{receipt ? 'Scan to see this receipt, or to give feedback or raise a complaint.' : 'Scan to see your receipt and pay.'}</span></div>
       {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Show it at the exit gate.<br />Thank you · Drive safe</div>}
     </div>
   )
@@ -598,6 +598,12 @@ export function StatusPill({ t }: { t: Ticket }) {
 // ---------- customer QR page ----------
 // What the customer sees on their phone after scanning the slip QR: their vehicle, time parked,
 // what they pay if they leave now, and the rates. Refreshes every 30 s.
+/** The slip QR. In the test APK a tap opens the ticket page here, since a phone cannot reach this device's copy. */
+function TicketQR({ token }: { token: string }) {
+  const qr = <QR text={ticketUrl(token)} size={96} />
+  return testBuild ? <a href={'#/t/' + token} title="Open the ticket page (test build)">{qr}</a> : qr
+}
+
 export function Customer({ db, token }: { db: DB; token: string }) {
   const now = useNow(30000)
   const t = db.tickets.find(x => x.token === token)

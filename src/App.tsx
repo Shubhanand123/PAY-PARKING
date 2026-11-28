@@ -1,7 +1,7 @@
 import { authEnabled, onSession, signOutLocal } from './parking-auth'
 import { Login } from './Login'
 import { apiEnabled, callParking, currentSnapshot, deviceKey, isOfflineError, openAccess, outbox, ParkingApiError, setDeviceKey, syncOutbox, type Snapshot } from './parking-api'
-import { nativeApp, PlateReader } from './native'
+import { nativeApp, PlateReader, testBuild } from './native'
 import { fmtTime, type DB } from './engine'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useDB, useNow, Ico, Toast } from './ui'
@@ -36,7 +36,7 @@ const isPublic = (r: string) => r === 'privacy' || r === 'terms' || r === 'verif
 export default function App() {
   const [r, setR] = useState(route())
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
-  if (isPublic(r)) return <Suspense fallback={<main className="content"><p role="status">Loading…</p></main>}><PublicPages route={r} /></Suspense>
+  if (isPublic(r)) return <><Suspense fallback={<main className="content"><p role="status">Loading…</p></main>}><PublicPages route={r} /></Suspense>{testBuild && <TestBar />}</>
   return !apiEnabled ? <LocalApp /> : openAccess ? <OpenApp /> : <ConnectedApp />
 }
 
@@ -240,13 +240,14 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
     <div className="screen">
       <header className="cp-head"><img className="parker-logo" src="parker-logo.png" alt="PARKER" /><div><b>Your parking ticket</b><small>{db.settings.siteName}</small></div></header>
       <main className="content cp-main"><Customer db={db} token={r.slice(2)} /></main>
+      {testBuild && <TestBar />}
     </div>
   )
 
   // The POS app is for the gates only: the Owner dashboard lives on the website, behind the Owner's sign-in.
-  const requested: View = r === 'exit' ? 'exit' : r === 'owner' && !nativeApp ? 'owner' : 'entry'
+  const requested: View = r === 'exit' ? 'exit' : r === 'owner' && (!nativeApp || testBuild) ? 'owner' : 'entry'
   const view = role === 'both' ? (requested === 'exit' ? 'exit' : 'entry') : role ?? requested
-  const routes: View[] = role === 'both' || nativeApp ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
+  const routes: View[] = role === 'both' || (nativeApp && !testBuild) ? ['entry', 'exit'] : role ? [] : ['entry', 'exit', 'owner']
   const me = db.staff.find(s => s.id === (view === 'entry' ? 'ravi' : view === 'exit' ? 'sunil' : 'owner'))!
   const wide = view === 'owner'
   const gate = view !== 'owner'
@@ -268,8 +269,16 @@ function ParkingApp({ db, role: given, signOut, offline = false }: { db: DB; rol
         {view === 'owner' && <Suspense fallback={<p className="muted" style={{ padding: 24 }}>Opening the dashboard…</p>}><Owner db={db} me={me} toast={say} /></Suspense>}
       </main>
       {toast && <Toast msg={toast.m} tone={toast.bad ? 'bad' : 'ok'} onDone={done} />}
+      {testBuild && <TestBar />}
     </div>
   )
+}
+
+/** Test APK only: every screen one tap away, since the customer's phone cannot reach this device's copy. */
+function TestBar() {
+  return <nav className="test-bar" aria-label="Test build">
+    <b>TEST</b><a href="#/entry">Entry</a><a href="#/exit">Exit</a><a href="#/owner">Owner</a><a href="#/privacy">Privacy</a><a href="#/terms">Terms</a><a href="#/verify">Check report</a>
+  </nav>
 }
 
 /** H2 header for the gates: colour-coded Entry (blue) / Exit (orange) switch, clock and connection light.

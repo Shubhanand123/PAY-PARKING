@@ -21,3 +21,6 @@ export function nativeScan(qr: boolean, title: string) {
   pending ??= PlateReader.scan({ qr, title }).finally(() => { pending = undefined })
   return pending
 }
+
+/** Test APK built with `--mode demo`: runs on this device's own copy (no server) and shows a test bar. */
+export const testBuild = import.meta.env.VITE_TEST_BUILD === 'true'
