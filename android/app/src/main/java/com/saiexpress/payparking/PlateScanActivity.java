@@ -84,7 +84,9 @@ public class PlateScanActivity extends AppCompatActivity {
     private TextRecognizer text;
     private BarcodeScanner qr;
     private ScanOverlay overlay;
-    private TextView status;
+    private TextView status, diag;
+    private Runnable diagTick;
+    private volatile int boxSeen; private volatile String bestText; private volatile float bestConf;
     private Button light;
     private Camera camera;
     private boolean torchOn, finished;
@@ -149,6 +151,23 @@ public class PlateScanActivity extends AppCompatActivity {
         status = label(readsQr ? "Point at the ticket QR or the number plate" : "Keep the whole plate inside the frame", 16, false);
         status.setGravity(Gravity.CENTER);
         bottom.addView(status);
+        // Live check line: where the time goes while scanning (frames/s, plate box found, best reading so far).
+        diag = new TextView(this);
+        diag.setTextColor(0xCCFFFFFF);
+        diag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        diag.setGravity(Gravity.CENTER);
+        diag.setPadding(0, dp(4), 0, 0);
+        bottom.addView(diag);
+        main.postDelayed(diagTick = () -> {
+            if (finished) return;
+            long ms = shownAt > 0 ? System.currentTimeMillis() - shownAt : 0;
+            float fps = ms > 0 ? framesSeen * 1000f / ms : 0;
+            String models = (PlateFinder.ready() == null ? "finder loading" : "finder ok") + (PlateTextReader.ready() == null ? " · reader loading" : "") ;
+            diag.setText(String.format(java.util.Locale.ROOT, "%.1f s · %.0f fps · %s · plate box %s (%d ms)%s",
+                ms / 1000f, fps, models, boxSeen > 0 ? "seen " + boxSeen + "×" : "not seen", finderMs,
+                bestText != null ? String.format(java.util.Locale.ROOT, " · best %s %.0f%%", bestText, bestConf * 100) : ""));
+            main.postDelayed(diagTick, 400);
+        }, 400);
         LinearLayout buttons = new LinearLayout(this);
         buttons.setGravity(Gravity.CENTER);
         buttons.setPadding(0, dp(12), 0, 0);
@@ -293,6 +312,7 @@ public class PlateScanActivity extends AppCompatActivity {
         }
         finderMs = (System.nanoTime() - t0) / 1_000_000;
         boolean boxed = band != null;
+        if (boxed) boxSeen++;
         if (!boxed) window.clear(); // no plate in view: the next vehicle starts a new window
         // Our Indian plate reader on the plate box (a few ms). A sure reading of a valid plate is taken at once.
         PlateTextReader ours = boxed ? PlateTextReader.ready() : null;
@@ -313,6 +333,7 @@ public class PlateScanActivity extends AppCompatActivity {
                     rd = ours.read(band);
                     plate = PlateRules.directFromLines(java.util.Collections.singletonList(rd.text));
                 }
+                if (rd.text != null && !rd.text.isEmpty() && rd.confidence > bestConf) { bestConf = rd.confidence; bestText = rd.text; }
                 // Not sure yet (often a side angle): straighten the plate (tilt + lean) and read it again; keep the surer reading.
                 if (corners == null && (plate == null || rd.confidence < 0.95f)) {
                     PlateStraightener.Result st = PlateStraightener.straighten(band);
