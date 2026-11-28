@@ -359,14 +359,14 @@ public class PlateScanActivity extends AppCompatActivity {
                 for (Seen x : window) if (x.reading.sharpness > sharpest.reading.sharpness) sharpest = x;
                 String got = null; Bitmap from = band; boolean voted = false;
                 String p1 = PlateRules.directFromLines(java.util.Collections.singletonList(sharpest.reading.text));
-                if (p1 != null && sharpest.reading.confidence >= 0.95f) { got = p1; from = sharpest.picture; }
+                if (p1 != null && sharpest.reading.confidence >= 0.85f) { got = p1; from = sharpest.picture; } // 3.22: owner chose speed over a little accuracy (was 0.95)
                 else {
                     List<PlateTextReader.Reading> use = new ArrayList<>();
                     for (Seen x : window) if (x.reading.sharpness >= 0.5f * sharpest.reading.sharpness) use.add(x.reading);
                     if (use.size() >= 2) {
                         PlateTextReader.Reading v = PlateTextReader.vote(use);
                         String p2 = PlateRules.directFromLines(java.util.Collections.singletonList(v.text));
-                        if (p2 != null && v.confidence >= 0.85f) { got = p2; from = sharpest.picture; voted = true; }
+                        if (p2 != null && v.confidence >= 0.75f) { got = p2; from = sharpest.picture; voted = true; } // 3.22: was 0.85
                     }
                 }
                 if (got != null) {
@@ -476,7 +476,7 @@ public class PlateScanActivity extends AppCompatActivity {
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
         float fps = shownAt > 0 ? framesSeen * 1000f / Math.max(1, System.currentTimeMillis() - shownAt) : 0;
         status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader" + (straightened ? " (straightened)" : "") + (lastVoted ? " (frames voted)" : "") + " " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
-        main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
+        main.postDelayed(this::finish, 200); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 
     private void cancel() {

@@ -36,6 +36,12 @@ public class PlateReaderPlugin extends Plugin {
     @Override
     public void load() {
         PlateScanActivity.warmUp(getContext()); // load the camera and text reader early: the first scan opens fast
+        // 3.22: TFLite models are safe to load early (crash-guarded, one after the other), 5 s after start,
+        // so the first scan does not wait for them.
+        final android.content.Context app = getContext().getApplicationContext();
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> new Thread(() -> {
+            PlateTextReader.get(app); PlateFinder.get(app); PlateCorners.get(app);
+        }, "plate-models-early").start(), 5000);
         listenToHardwareScanner();
     }
 
