@@ -85,6 +85,7 @@ public class PlateScanActivity extends AppCompatActivity {
     private BarcodeScanner qr;
     private ScanOverlay overlay;
     private TextView status, diag;
+    private String lastExit = "";
     private Runnable diagTick;
     private volatile int boxSeen; private volatile String bestText; private volatile float bestConf;
     private Button light;
@@ -153,6 +154,7 @@ public class PlateScanActivity extends AppCompatActivity {
         status.setGravity(Gravity.CENTER);
         bottom.addView(status);
         // Live check line: where the time goes while scanning (frames/s, plate box found, best reading so far).
+        lastExit = ModelGuard.lastExit(this);
         diag = new TextView(this);
         diag.setTextColor(0xCCFFFFFF);
         diag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
@@ -163,7 +165,7 @@ public class PlateScanActivity extends AppCompatActivity {
             if (finished) return;
             long ms = shownAt > 0 ? System.currentTimeMillis() - shownAt : 0;
             float fps = ms > 0 ? framesSeen * 1000f / ms : 0;
-            String models = android.os.Build.SUPPORTED_ABIS[0] + " · finder " + PlateFinder.GUARD.state + " · reader " + PlateTextReader.GUARD.state + " · corners " + PlateCorners.GUARD.state;
+            String models = android.os.Build.SUPPORTED_ABIS[0] + (lastExit.isEmpty() ? "" : " · " + lastExit) + " · finder " + PlateFinder.GUARD.state + " · reader " + PlateTextReader.GUARD.state + " · corners " + PlateCorners.GUARD.state;
             diag.setText(String.format(java.util.Locale.ROOT, "%.1f s · %.0f fps · %s · plate box %s (%d ms)%s",
                 ms / 1000f, fps, models, boxSeen > 0 ? "seen " + boxSeen + "×" : "not seen", finderMs,
                 bestText != null ? String.format(java.util.Locale.ROOT, " · best %s %.0f%%", bestText, bestConf * 100) : ""));

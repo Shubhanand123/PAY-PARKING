@@ -75,8 +75,9 @@ final class PlateFinder {
         env = OrtEnvironment.getEnvironment();
         // CPU only: the AI-chip path (NNAPI) crashed the whole app on a POS (a native crash that can't be caught).
         OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-        cpu.setIntraOpNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())));
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT); // basic only: the full optimiser can pick CPU instructions older POS chips lack
+        cpu.setIntraOpNumThreads(1);
+        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
+        cpu.setCPUArenaAllocator(false); cpu.setMemoryPatternOptimization(false); // low-memory POS: no big blocks reserved in advance
         GUARD.step(context, "model load");
         OrtSession s = env.createSession(model, cpu);
         String used = "CPU";

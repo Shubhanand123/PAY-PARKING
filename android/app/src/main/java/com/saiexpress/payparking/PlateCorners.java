@@ -65,8 +65,9 @@ final class PlateCorners {
         GUARD.step(context, "engine start");
         env = OrtEnvironment.getEnvironment();
         OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-        cpu.setIntraOpNumThreads(2);
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT); // basic only: the full optimiser can pick CPU instructions older POS chips lack
+        cpu.setIntraOpNumThreads(1);
+        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
+        cpu.setCPUArenaAllocator(false); cpu.setMemoryPatternOptimization(false); // low-memory POS: no big blocks reserved in advance
         GUARD.step(context, "model load");
         session = env.createSession(model, cpu);
         inputName = session.getInputNames().iterator().next();

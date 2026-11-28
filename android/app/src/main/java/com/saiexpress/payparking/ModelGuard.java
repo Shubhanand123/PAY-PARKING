@@ -33,6 +33,30 @@ final class ModelGuard {
     }
     /** Remember the step being done now, so a crash shows where it happened (engine start / model load / first run). */
     void step(Context c, String what) { prefs(c).edit().putString("stage", what).commit(); }
+    /** Why Android closed this app the last time (Android 11+): e.g. "low memory" or "native crash". */
+    static String lastExit(Context c) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return "";
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            java.util.List<android.app.ApplicationExitInfo> list = am.getHistoricalProcessExitReasons(c.getPackageName(), 0, 1);
+            if (list.isEmpty()) return "";
+            android.app.ApplicationExitInfo e = list.get(0);
+            String r;
+            switch (e.getReason()) {
+                case android.app.ApplicationExitInfo.REASON_LOW_MEMORY: r = "LOW MEMORY"; break;
+                case android.app.ApplicationExitInfo.REASON_CRASH_NATIVE: r = "native crash"; break;
+                case android.app.ApplicationExitInfo.REASON_CRASH: r = "Java crash"; break;
+                case android.app.ApplicationExitInfo.REASON_ANR: r = "not responding"; break;
+                case android.app.ApplicationExitInfo.REASON_SIGNALED: r = "killed by signal " + e.getStatus(); break;
+                case android.app.ApplicationExitInfo.REASON_EXIT_SELF: r = "closed normally"; break;
+                case android.app.ApplicationExitInfo.REASON_USER_REQUESTED: r = "closed by user"; break;
+                default: r = "reason " + e.getReason();
+            }
+            String d = e.getDescription();
+            long ago = (System.currentTimeMillis() - e.getTimestamp()) / 60000;
+            return "last close: " + r + (d != null && !d.isEmpty() ? " (" + (d.length() > 50 ? d.substring(0, 50) : d) + ")" : "") + ", " + ago + " min ago, RAM " + (am.getMemoryClass()) + " MB";
+        } catch (Throwable t) { return ""; }
+    }
     void loaded(Context c) { prefs(c).edit().remove("trying").putInt("strikes", 0).commit(); state = "ok"; }
     void failed(Context c, Throwable e) {
         prefs(c).edit().remove("trying").commit();
