@@ -8,6 +8,7 @@ ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_'; SLOTS = 10; H, W = 64, 128
 random.seed(1); np.random.seed(1); tf.random.set_seed(1)
 # STRAIGHT=p: share of real plates shown as the app's 4-corner model would hand them over (turned in 3D, then warped flat
 # from corners with CORNER_ERR error, as a fraction of plate width). Needs the 256 x 128 pictures, so real plates load at 2x.
+BLUR_P = float(os.environ.get('BLUR_P', 0.35)); BLUR_MAX = int(os.environ.get('BLUR_MAX', 9))  # motion blur practice (default = v4's)
 STRAIGHT = float(os.environ.get('STRAIGHT', 0)); CORNER_ERR = float(os.environ.get('CORNER_ERR', 0.03)); HI = 2 if STRAIGHT else 1
 def load(csvname, hi=1):
     rows = list(csv.DictReader(open(os.path.join(D, csvname))))
@@ -19,6 +20,8 @@ def load(csvname, hi=1):
         for j, ch in enumerate(t): Y[i, j, ALPHA.index(ch)] = 1
     return X, Y, T
 Xr, Yr, _ = load('train.csv', HI); Xs, Ys, _ = load('synth.csv')
+if os.path.exists(os.path.join(D, 'synth2.csv')):  # second synthetic set (synth_many.sh, e.g. blur-heavy)
+    X2, Y2, _ = load('synth2.csv'); Xs = np.concatenate([Xs, X2]); Ys = np.concatenate([Ys, Y2]); del X2, Y2; print('added synth2.csv', flush=True)
 # more real Indian plates: character-labelled sets and self-labelled plates (if present)
 for extra in ('extra.csv', 'self.csv', 'npds.csv', 'iurs.csv', 'hrlr.csv', 'hfgam.csv', 'kaggle.csv'):
     if os.path.exists(os.path.join(D, extra)):
@@ -51,8 +54,8 @@ def augment(x):
     x = x.astype(np.float32)
     if random.random() < 0.8: x = x * random.uniform(0.6, 1.35) + random.uniform(-35, 35)
     if random.random() < 0.3: x = cv2.GaussianBlur(x, (0, 0), random.uniform(0.3, 1.2))
-    if random.random() < 0.35:  # hand shake: motion blur in a random direction, 3-9 px long
-        k = random.choice([3, 5, 7, 9]); kern = np.zeros((k, k), np.float32); kern[k // 2, :] = 1
+    if random.random() < BLUR_P:  # hand shake / moving vehicle: motion blur in a random direction, 3..BLUR_MAX px long
+        k = random.choice(range(3, BLUR_MAX + 1, 2)); kern = np.zeros((k, k), np.float32); kern[k // 2, :] = 1
         M = cv2.getRotationMatrix2D((k / 2 - .5, k / 2 - .5), random.uniform(0, 180), 1); kern = cv2.warpAffine(kern, M, (k, k)); kern /= max(kern.sum(), 1e-6)
         x = cv2.filter2D(x, -1, kern)
     if random.random() < 0.5:
@@ -81,9 +84,15 @@ class Batches(keras.utils.PyDataset):
 # SELECT=mix: the best model is chosen on val crops as the app gives them with the 4-corner model: plain, straightened
 # (straight-on plate, corner error only) and turned 20-55 deg then straightened; the score is the mean of the three.
 VAL_SETS = [('plain', None)]
-if os.environ.get('SELECT') == 'mix':
+def moving(x2, L, rnd):  # same as blur_eval.py: motion blur L px at 256 x 128, mostly sideways, then 128 x 64
+    k = np.zeros((L, L), np.float32); k[L // 2] = 1; ang = rnd.uniform(-25, 25) if rnd.random() < 0.7 else rnd.uniform(65, 115)
+    k = cv2.warpAffine(k, cv2.getRotationMatrix2D((L / 2 - .5, L / 2 - .5), ang, 1), (L, L)); k /= max(k.sum(), 1e-6)
+    return cv2.resize(cv2.filter2D(x2, -1, k), (W, H), interpolation=cv2.INTER_AREA)
+if os.environ.get('SELECT') in ('mix', 'mixblur'):
     Xv2, _, _ = load('val.csv', 2); random.seed(5); np.random.seed(5)
     VAL_SETS += [('straightened', np.stack([straightened(x, False) for x in Xv2])), ('turned+straightened', np.stack([straightened(x, True) for x in Xv2]))]
+    if os.environ.get('SELECT') == 'mixblur':  # SELECT=mixblur: also moving vehicles (motion blur 10 and 16 px)
+        for L in (10, 16): rnd = random.Random(7); VAL_SETS.append((f'motion {L}px', np.stack([moving(x, L, rnd) for x in Xv2])))
     del Xv2; random.seed(1); np.random.seed(1)
 def vscore(show=False):
     parts = [score(Xv if X is None else X, Tv) for _, X in VAL_SETS]

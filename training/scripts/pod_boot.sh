@@ -35,7 +35,7 @@ fi
 log "data ready: $(du -sh det anpr | tr '\n' ' ')"
 # logs to the shared folder every minute while training
 (while true; do cp -f $A/*.log $O/ 2>/dev/null; sleep 60; done) &
-timeout 6h bash scripts/night6.sh || log "night6 ended with an error or after 6 h"
+timeout 6h bash scripts/${JOB:-night6}.sh || log "${JOB:-night6} ended with an error or after 6 h"
 cp -f $A/*.log $O/
 cp -f runs/finder/finder_best.pt runs/corners1/corners_best.pt $O/ 2>/dev/null; cp -f runs/corners2/corners_best.pt $O/corners2_best.pt 2>/dev/null
 cp -f anpr/reader_v5.keras $O/ 2>/dev/null

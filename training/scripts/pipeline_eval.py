@@ -68,10 +68,13 @@ plates = [(os.path.join(DET, 'test', ims[a['image_id']]['file_name']), np.array(
           if ims[a['image_id']]['source'] == 'payals' and valid(a.get('text', ''))]
 if os.environ.get('UNSEEN_ONLY'):  # only plates whose number is not in this training list (same vehicle, other photo)
     import csv; seen = {r['plate_text'] for r in csv.DictReader(open(os.environ['UNSEEN_ONLY']))}; plates = [p for p in plates if p[2] not in seen]
-random.seed(11); views = {'straight': [], 'turned 20-50 deg': []}
+random.seed(11); views = {'straight': [], 'turned 20-50 deg': [], 'moving (motion 10 px)': []}
 for path, (x, y, w, h), text in plates:
     im = cv2.imread(path); q = np.float32([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]); views['straight'].append((im, text))
     t, _ = C.turn(im, q, random.choice([-1, 1]) * random.uniform(20, 50), random.uniform(-10, 10), random.uniform(-6, 6), 1.6); views['turned 20-50 deg'].append((t, text))
+    L = max(2, round(10 * w / 256))  # 10 px on a 256 px wide plate picture, scaled to this plate's width in the photo
+    k = np.zeros((L, L), np.float32); k[L // 2] = 1; k = cv2.warpAffine(k, cv2.getRotationMatrix2D((L / 2 - .5, L / 2 - .5), random.uniform(-25, 25), 1), (L, L))
+    views['moving (motion 10 px)'].append((cv2.filter2D(im, -1, k / max(k.sum(), 1e-6)), text))
 print(len(plates), 'test plates (valid numbers) on full photos', flush=True)
 results = {}
 for fname, fs in FINDERS:

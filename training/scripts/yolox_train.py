@@ -122,11 +122,12 @@ if __name__ == '__main__':
     sd = torch.load(os.environ.get('WEIGHTS', 'weights/yolox_nano.pth'), map_location='cpu', weights_only=False)['model']
     own = model.m.state_dict(); keep = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
     model.m.load_state_dict(keep, strict=False); print('COCO weights loaded:', len(keep), 'of', len(own), flush=True)
+    if os.environ.get('INIT'): model.load_state_dict(torch.load(os.environ['INIT'], map_location='cpu')); print('continuing from', os.environ['INIT'], flush=True)
     model.to(dev).train()
     dl = torch.utils.data.DataLoader(Data(train, True), batch_size=BS, shuffle=True, num_workers=int(os.environ.get('WORKERS', 8)), drop_last=True, persistent_workers=True)
     opt = torch.optim.SGD([{'params': [p for n, p in model.named_parameters() if p.ndim > 1], 'weight_decay': 5e-4},
                            {'params': [p for n, p in model.named_parameters() if p.ndim <= 1], 'weight_decay': 0}], lr=0.01, momentum=0.9, nesterov=True)
-    total = EPOCHS * len(dl); warm = min(3 * len(dl), total // 5); LR = 0.01 * BS / 64
+    total = EPOCHS * len(dl); warm = min(3 * len(dl), total // 5); LR = 0.01 * BS / 64 * float(os.environ.get('LR_SCALE', 1))
     lr_at = lambda s: LR * (s / warm) ** 2 if s < warm else LR * (0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * (s - warm) / max(1, total - warm))))
     scaler = torch.amp.GradScaler(enabled=dev == 'cuda')
     LAST = os.path.join(OUT, 'finder.last.pt'); first, best = 0, -1

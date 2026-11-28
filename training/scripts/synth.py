@@ -2,7 +2,10 @@
 # white (private) and yellow (commercial) plates, HSRP "IND" strip, bold sans fonts, then blur / tilt / glare / noise.
 import os, sys, csv, random, numpy as np, cv2, glob
 from PIL import Image, ImageDraw, ImageFont
-out, n = sys.argv[1], int(sys.argv[2]); random.seed(7); np.random.seed(7)
+out, n = sys.argv[1], int(sys.argv[2])
+# env (defaults = the original set): SEED, PREFIX (file names), CSV, BLURRY=1 (moving-vehicle blur on most plates)
+SEED = int(os.environ.get('SEED', 7)); PREFIX = os.environ.get('PREFIX', 's'); CSV = os.environ.get('CSV', 'synth.csv'); BLURRY = bool(os.environ.get('BLURRY'))
+random.seed(SEED); np.random.seed(SEED)
 os.makedirs(os.path.join(out, 'synth'), exist_ok=True)
 fonts = [f for f in glob.glob('/usr/share/fonts/truetype/**/*.ttf', recursive=True) if any(k in f for k in ('DejaVuSans-Bold', 'DejaVuSansCondensed-Bold', 'LiberationSans-Bold.', 'LiberationSansNarrow-Bold', 'DejaVuSansMono-Bold', 'LiberationMono-Bold.')) and 'Oblique' not in f and 'Italic' not in f]
 STATES = 'AN AP AR AS BR CH CG DD DL DN GA GJ HR HP JK JH KA KL LA LD MP MH MN ML MZ NL OD OR PY PB RJ SK TN TS TR UP UK WB'.split()
@@ -40,6 +43,10 @@ def render(p):
     src = np.float32([[0, 0], [w, 0], [w, h], [0, h]]); dst = (src + np.random.uniform(-j, j, (4, 2)) * np.array([w, h])).astype(np.float32)
     a = cv2.warpPerspective(a, cv2.getPerspectiveTransform(src, dst), (w, h), borderMode=cv2.BORDER_REPLICATE)
     if random.random() < 0.5: a = cv2.GaussianBlur(a, (0, 0), random.uniform(0.3, 1.6))
+    if BLURRY and random.random() < 0.7:  # vehicle moving: motion blur up to 28 px sideways / 16 px towards the camera, at full plate size
+        side = random.random() < 0.8; k = random.randint(4, 28 if side else 16); ker = np.zeros((k, k), np.float32); ker[k // 2] = 1
+        ang = random.uniform(-25, 25) if side else random.uniform(65, 115)
+        ker = cv2.warpAffine(ker, cv2.getRotationMatrix2D((k / 2 - .5, k / 2 - .5), ang, 1), (k, k)); a = cv2.filter2D(a, -1, ker / max(ker.sum(), 1e-6))
     if random.random() < 0.3:  # glare
         gx = random.randint(0, w); g = np.clip(1 - np.abs(np.arange(w) - gx) / (w * 0.25), 0, 1) * random.uniform(40, 110); a = np.clip(a + g[None, :, None], 0, 255).astype(np.uint8)
     a = np.clip(a * random.uniform(0.55, 1.2) + np.random.normal(0, random.uniform(2, 10), a.shape), 0, 255).astype(np.uint8)
@@ -50,6 +57,6 @@ rows = []
 for i in range(n):
     p = number()
     if len(p) > 10: continue
-    name = f'synth/s{i:05d}.jpg'; cv2.imwrite(os.path.join(out, name), render(p), [cv2.IMWRITE_JPEG_QUALITY, random.randint(55, 92)]); rows.append((name, p))
-with open(os.path.join(out, 'synth.csv'), 'w', newline='') as fh: w = csv.writer(fh); w.writerow(['image_path', 'plate_text']); w.writerows(rows)
+    name = f'synth/{PREFIX}{i:06d}.jpg' if PREFIX != 's' else f'synth/s{i:05d}.jpg'; cv2.imwrite(os.path.join(out, name), render(p), [cv2.IMWRITE_JPEG_QUALITY, random.randint(55, 92)]); rows.append((name, p))
+with open(os.path.join(out, CSV), 'w', newline='') as fh: w = csv.writer(fh); w.writerow(['image_path', 'plate_text']); w.writerows(rows)
 print(len(rows), 'synthetic plates')

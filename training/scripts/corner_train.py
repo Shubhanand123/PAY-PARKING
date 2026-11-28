@@ -136,11 +136,13 @@ if __name__ == '__main__':
             '163 test plates, turned 20-50 deg': fixed_set(load('test', ('payals',)), 3, True)}
     print('train plates', len(train), '| exact-corner plates', len(exact), '| val', {k: len(v[0]) for k, v in sets.items()}, flush=True)
     model = Corners().to(dev)
+    if os.environ.get('INIT'): model.load_state_dict(torch.load(os.environ['INIT'], map_location=dev)); print('continuing from', os.environ['INIT'], flush=True)
     n = int(os.environ.get('PER_EPOCH', 40000)); BS = int(os.environ.get('BS', 128))
     dl = torch.utils.data.DataLoader(Data(train, n), batch_size=BS, num_workers=int(os.environ.get('WORKERS', 8)), drop_last=True, persistent_workers=True,
                                      worker_init_fn=lambda k: (random.seed(torch.initial_seed() % 2**31 + k), np.random.seed((torch.initial_seed() + k) % 2**31)))
-    opt = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, 2e-3, total_steps=EPOCHS * len(dl), pct_start=0.1)
+    LR = 2e-3 * float(os.environ.get('LR_SCALE', 1))
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, LR, total_steps=EPOCHS * len(dl), pct_start=0.1)
     best = 1e9; MAX = int(os.environ.get('MAX_STEPS', 0)); step = 0
     for ep in range(EPOCHS):
         t0 = time.time(); ls = []
