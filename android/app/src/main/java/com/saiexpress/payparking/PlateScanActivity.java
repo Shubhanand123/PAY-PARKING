@@ -163,7 +163,7 @@ public class PlateScanActivity extends AppCompatActivity {
             if (finished) return;
             long ms = shownAt > 0 ? System.currentTimeMillis() - shownAt : 0;
             float fps = ms > 0 ? framesSeen * 1000f / ms : 0;
-            String models = "finder " + PlateFinder.GUARD.state + " · reader " + PlateTextReader.GUARD.state + " · corners " + PlateCorners.GUARD.state;
+            String models = android.os.Build.SUPPORTED_ABIS[0] + " · finder " + PlateFinder.GUARD.state + " · reader " + PlateTextReader.GUARD.state + " · corners " + PlateCorners.GUARD.state;
             diag.setText(String.format(java.util.Locale.ROOT, "%.1f s · %.0f fps · %s · plate box %s (%d ms)%s",
                 ms / 1000f, fps, models, boxSeen > 0 ? "seen " + boxSeen + "×" : "not seen", finderMs,
                 bestText != null ? String.format(java.util.Locale.ROOT, " · best %s %.0f%%", bestText, bestConf * 100) : ""));

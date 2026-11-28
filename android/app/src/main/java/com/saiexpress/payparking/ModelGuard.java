@@ -26,10 +26,13 @@ final class ModelGuard {
         int v = version(c);
         if (p.getInt("version", -1) != v) p.edit().clear().putInt("version", v).commit();
         int strikes = p.getInt("strikes", 0) + (p.getBoolean("trying", false) ? 1 : 0);
-        if (strikes >= 1) { p.edit().putInt("strikes", strikes).remove("trying").commit(); state = "off: crashed on this POS (" + android.os.Build.SUPPORTED_ABIS[0] + ", Android " + android.os.Build.VERSION.RELEASE + ")"; return false; }
+        if (strikes >= 1) {
+            String at = p.getString("stage", "?"); p.edit().putInt("strikes", strikes).remove("trying").commit(); state = "off: crashed at " + at; return false; }
         p.edit().putInt("strikes", strikes).putBoolean("trying", true).commit();
         return true;
     }
+    /** Remember the step being done now, so a crash shows where it happened (engine start / model load / first run). */
+    void step(Context c, String what) { prefs(c).edit().putString("stage", what).commit(); }
     void loaded(Context c) { prefs(c).edit().remove("trying").putInt("strikes", 0).commit(); state = "ok"; }
     void failed(Context c, Throwable e) {
         prefs(c).edit().remove("trying").commit();

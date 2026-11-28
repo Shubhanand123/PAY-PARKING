@@ -62,12 +62,15 @@ final class PlateCorners {
             for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
             model = out.toByteArray();
         }
+        GUARD.step(context, "engine start");
         env = OrtEnvironment.getEnvironment();
         OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
         cpu.setIntraOpNumThreads(2);
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
+        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT); // basic only: the full optimiser can pick CPU instructions older POS chips lack
+        GUARD.step(context, "model load");
         session = env.createSession(model, cpu);
         inputName = session.getInputNames().iterator().next();
+        GUARD.step(context, "first run");
         flatten(Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)); // warm up
     }
 

@@ -71,11 +71,13 @@ final class PlateFinder {
 
     private PlateFinder(Context context) throws Exception {
         byte[] model = read(context, "models/plate_finder_224.onnx");
+        GUARD.step(context, "engine start");
         env = OrtEnvironment.getEnvironment();
         // CPU only: the AI-chip path (NNAPI) crashed the whole app on a POS (a native crash that can't be caught).
         OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
         cpu.setIntraOpNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())));
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
+        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT); // basic only: the full optimiser can pick CPU instructions older POS chips lack
+        GUARD.step(context, "model load");
         OrtSession s = env.createSession(model, cpu);
         String used = "CPU";
         session = s;
@@ -85,6 +87,7 @@ final class PlateFinder {
         SIZE = (int) shape[2];
         board = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888); canvas = new Canvas(board);
         pixels = new int[SIZE * SIZE]; input = FloatBuffer.allocate(3 * SIZE * SIZE);
+        GUARD.step(context, "first run");
         find(Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)); // first run is slow: do it now, not on the first vehicle
     }
 
