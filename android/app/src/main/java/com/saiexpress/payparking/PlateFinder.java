@@ -47,7 +47,7 @@ final class PlateFinder {
     // Crash guard: a flag is written before the model first loads and runs, and cleared once it has worked.
     // If the app is killed in between (a native crash), the flag is still there at the next start and the finder
     // stays switched off on this phone; the scanner then reads the plate the old way.
-    private static final String PREFS = "plate_finder", TRYING = "trying_v2", OFF = "off_v2"; // v2: new model, fresh try
+    static final ModelGuard GUARD = new ModelGuard("finder");
 
     /** The finder if it is already loaded, without waiting (the scanner reads the old way until then). */
     static PlateFinder ready() { return shared; }
@@ -62,16 +62,9 @@ final class PlateFinder {
     /** The shared finder, loaded once. Null if the model can't run on this POS. */
     static synchronized PlateFinder get(Context context) {
         if (shared == null && !failed) {
-            android.content.SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            if (prefs.getBoolean(OFF, false)) { failed = true; return null; }
-            if (prefs.getBoolean(TRYING, false)) { // it crashed last time: never try again on this phone
-                prefs.edit().putBoolean(OFF, true).remove(TRYING).commit();
-                failed = true; Log.w(TAG, "Plate finder crashed earlier on this phone: switched off");
-                return null;
-            }
-            prefs.edit().putBoolean(TRYING, true).commit();
-            try { shared = new PlateFinder(context.getApplicationContext()); prefs.edit().remove(TRYING).commit(); }
-            catch (Throwable e) { failed = true; prefs.edit().remove(TRYING).commit(); Log.w(TAG, "Plate finder unavailable: " + e); }
+            if (!GUARD.begin(context)) { failed = true; return null; }
+            try { shared = new PlateFinder(context.getApplicationContext()); GUARD.loaded(context); }
+            catch (Throwable e) { failed = true; GUARD.failed(context, e); android.util.Log.w("PlateFinder", "unavailable: " + e); }
         }
         return shared;
     }

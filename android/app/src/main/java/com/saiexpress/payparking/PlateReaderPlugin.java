@@ -36,6 +36,12 @@ public class PlateReaderPlugin extends Plugin {
     @Override
     public void load() {
         PlateScanActivity.warmUp(getContext()); // load the camera and text reader early: the first scan opens fast
+        // Load the plate models 3 s after start (in the background, CPU only, crash-guarded), so they are
+        // ready before the first scan instead of loading while the operator points at a plate.
+        final android.content.Context app = getContext().getApplicationContext();
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            PlateFinder.loadInBackground(app); PlateTextReader.loadInBackground(app); PlateCorners.loadInBackground(app);
+        }, 3000);
         listenToHardwareScanner();
     }
 

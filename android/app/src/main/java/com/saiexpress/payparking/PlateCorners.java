@@ -27,7 +27,7 @@ final class PlateCorners {
     private static final String TAG = "PlateCorners";
     private static final int W = 160, H = 80, OUT_W = 128, OUT_H = 64;
     private static final float MX = 0.05f, MY = 0.10f; // plate edges inside the reader picture (as in training)
-    private static final String PREFS = "plate_corners", TRYING = "trying_v1", OFF = "off_v1";
+    static final ModelGuard GUARD = new ModelGuard("corners");
 
     private static volatile PlateCorners shared;
     private static boolean failed;
@@ -48,12 +48,9 @@ final class PlateCorners {
 
     static synchronized PlateCorners get(Context context) {
         if (shared == null && !failed) {
-            android.content.SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            if (prefs.getBoolean(OFF, false)) { failed = true; return null; }
-            if (prefs.getBoolean(TRYING, false)) { prefs.edit().putBoolean(OFF, true).remove(TRYING).commit(); failed = true; return null; }
-            prefs.edit().putBoolean(TRYING, true).commit();
-            try { shared = new PlateCorners(context); prefs.edit().remove(TRYING).commit(); }
-            catch (Throwable e) { failed = true; prefs.edit().remove(TRYING).commit(); Log.w(TAG, "Plate corners unavailable: " + e); }
+            if (!GUARD.begin(context)) { failed = true; return null; }
+            try { shared = new PlateCorners(context.getApplicationContext()); GUARD.loaded(context); }
+            catch (Throwable e) { failed = true; GUARD.failed(context, e); android.util.Log.w("PlateCorners", "unavailable: " + e); }
         }
         return shared;
     }

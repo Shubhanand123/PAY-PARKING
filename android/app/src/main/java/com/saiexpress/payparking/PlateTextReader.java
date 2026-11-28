@@ -28,7 +28,7 @@ final class PlateTextReader {
     private static final String TAG = "PlateTextReader";
     private static final String ALPHA = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
     private static final int W = 128, H = 64;
-    private static final String PREFS = "plate_reader", TRYING = "trying_v1", OFF = "off_v1";
+    static final ModelGuard GUARD = new ModelGuard("reader");
 
     static final class Reading {
         final String text; final float confidence;
@@ -119,12 +119,9 @@ final class PlateTextReader {
 
     static synchronized PlateTextReader get(Context context) {
         if (shared == null && !failed) {
-            android.content.SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            if (prefs.getBoolean(OFF, false)) { failed = true; return null; }
-            if (prefs.getBoolean(TRYING, false)) { prefs.edit().putBoolean(OFF, true).remove(TRYING).commit(); failed = true; return null; }
-            prefs.edit().putBoolean(TRYING, true).commit();
-            try { shared = new PlateTextReader(context); prefs.edit().remove(TRYING).commit(); }
-            catch (Throwable e) { failed = true; prefs.edit().remove(TRYING).commit(); Log.w(TAG, "Plate reader unavailable: " + e); }
+            if (!GUARD.begin(context)) { failed = true; return null; }
+            try { shared = new PlateTextReader(context.getApplicationContext()); GUARD.loaded(context); }
+            catch (Throwable e) { failed = true; GUARD.failed(context, e); android.util.Log.w("PlateTextReader", "unavailable: " + e); }
         }
         return shared;
     }
