@@ -2,6 +2,8 @@
 // for the server. Every rule lives here so it can move to Supabase (Postgres functions) unchanged.
 // Money is always integer paise. Times are stored as UTC epoch ms and shown in Asia/Kolkata.
 
+import { readTicketQuery, receiptNumber, runningNumber, ticketNumber } from './numbers.ts'
+
 export type Role = 'attendant' | 'owner'
 export type Staff = { id: string; name: string; role: Role; gate: string }
 export type Category = { id: string; name: string; icon: string; active: boolean }
@@ -24,6 +26,7 @@ export type Settings = {
   cancelNeedsReason: boolean
   capacity: number       // total spaces; 0 = not tracked
   gstin?: string         // GST number, printed on slips and receipts
+  siteCode?: string      // site part of SKC ticket numbers, e.g. GA1 (default GA1)
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
 export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
@@ -75,7 +78,8 @@ export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticke
 export type DB = {
   razorpayEnabled?: boolean
   razorpayTest?: boolean
-  seq: number
+  seq: number            // last ticket running number (never reused)
+  rseq?: number          // last receipt running number
   staff: Staff[]
   categories: Category[]
   tariffs: TariffVersion[]
@@ -291,7 +295,7 @@ function newTicket(db: DB, plate: string, category: string, staffId: string, at:
   const s = db.staff.find(x => x.id === staffId)!
   const tv = activeTariff(db, at)
   const t: Ticket = {
-    id: 'T-' + String(++db.seq).padStart(6, '0'), token: token(), plate: normPlate(plate), category,
+    id: ticketNumber(db.settings.siteCode ?? 'GA1', at, ++db.seq), token: token(), plate: normPlate(plate), category,
     site: db.settings.siteName, entryGate: s.gate, entryBy: s.name, entryAt: at, tariffId: tv.id,
     prepaidHours, status: 'inside', prints: 0, rev: 1,
   }
@@ -300,7 +304,7 @@ function newTicket(db: DB, plate: string, category: string, staffId: string, at:
 }
 function addPayment(db: DB, t: Ticket, amountPaise: number, staffId: string, at: number, kind: Payment['kind'], method: Payment['method'] = 'cash') {
   const s = db.staff.find(x => x.id === staffId)!
-  const p: Payment = { id: uid(), ticketId: t.id, amountPaise, method, at, by: s.name, kind, receiptNo: 'R-' + String(db.payments.length + 1).padStart(6, '0') }
+  const p: Payment = { id: uid(), ticketId: t.id, amountPaise, method, at, by: s.name, kind, receiptNo: receiptNumber(at, db.rseq = (db.rseq ?? db.payments.length) + 1) }
   db.payments.push(p)
   return p
 }
@@ -333,7 +337,7 @@ export function makeReceipt(db: DB, t: Ticket, by: string): Receipt {
   const pays = db.payments.filter(p => p.ticketId === t.id)
   const last = pays[pays.length - 1]
   return {
-    receiptNo: last?.receiptNo ?? 'R-' + t.id.slice(2), issuedAt: Date.now(), issuedBy: by,
+    receiptNo: last?.receiptNo ?? (t.id.startsWith('SKC-') ? 'SKC-R-' + t.id.slice(4) : 'R-' + t.id.slice(2)), issuedAt: Date.now(), issuedBy: by,
     operator: db.settings.operator, siteName: db.settings.siteName, address: db.settings.address, phone: db.settings.phone, ...(db.settings.gstin ? { gstin: db.settings.gstin } : {}),
     ticketId: t.id, plate: t.plate, vehicle: db.categories.find(c => c.id === t.category)?.name ?? t.category, entryAt: t.entryAt, entryGate: t.entryGate,
     billedAt: t.billedAt ?? Date.now(), minutes: b.minutes, lines: b.lines, totalPaise: t.totalPaise ?? b.totalPaise,
@@ -404,12 +408,15 @@ export const markPrinted = (db: DB, s: Staff, id: string, what?: 'slip' | 'recei
 export function findTicketBySlip(tickets: Ticket[], input: string): Ticket | undefined {
   const value = input.trim()
   if (!value) return undefined
-
   const route = /#\/t\/([^/?#]+)$/i.exec(value)
   const token = route?.[1] ?? value
-  const number = /^(?:T-?)?(\d+)$/i.exec(value)?.[1]
-  const id = number ? 'T-' + number.padStart(6, '0') : undefined
-  return tickets.find(ticket => ticket.token === token || ticket.id === id)
+  const byToken = tickets.find(ticket => ticket.token === token)
+  if (byToken) return byToken
+  const q = readTicketQuery(value)
+  if (q.kind === 'full' || q.kind === 'old') return tickets.find(ticket => ticket.id === q.id)
+  // Just the running number ("142"): the ticket with that number, newest first.
+  if (q.kind === 'number') return [...tickets].reverse().find(ticket => runningNumber(ticket.id) === q.n)
+  return undefined // a wrong check digit finds nothing: the Exit screen says which number was meant
 }
 
 export const logLookup = (db: DB, s: Staff, id: string, how: 'plate' | 'qr' | 'search') => {

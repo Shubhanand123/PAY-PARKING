@@ -5,6 +5,7 @@ import {
 } from './razorpay.ts'
 import { loginAlias, pairedPassword } from '../../../src/parking-identity.ts'
 import * as parking from '../../../src/engine.ts'
+import { anyTicketId } from '../../../src/numbers.ts'
 import { applyOp, offlineTicketId, type OfflineOp } from '../../../src/offline-sync.ts'
 
 const endpoint = Deno.env.get('SUPABASE_URL')!
@@ -262,7 +263,7 @@ async function paymentRoute(action: PaymentRoute, payload: Record<string, unknow
   const ticketId = payload.ticket_id
   if (!actor && (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token))) return reply({ error: 'Ticket access is required.' }, 401)
   if (actor && !['owner', 'exit', 'both', 'open'].includes(actor.role)) return reply({ error: 'This account cannot take payments.' }, 403)
-  if (actor && (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
+  if (actor && (typeof ticketId !== 'string' || !anyTicketId.test(ticketId))) return reply({ error: 'Enter a valid parking ticket.' }, 400)
   const select = (db: parking.DB) => db.tickets.find(item => actor ? item.id === ticketId : item.token === token)
   // Fast "paid yet?" check from the gate: ask Razorpay about the open QR first; read the records only once money is there.
   if (action === 'check-payment' && actor && typeof payload.qr_id === 'string' && razorpayQrId.test(payload.qr_id) && Number.isSafeInteger(payload.amount) && (payload.amount as number) > 0) {
@@ -650,7 +651,7 @@ Deno.serve(async request => {
     if (action === 'saveScan') {
       if (!['entry', 'both', 'owner', 'open'].includes(role)) return reply({ error: 'This device cannot save scans.' }, 403)
       const [ticketId, read, image] = args
-      if (typeof ticketId !== 'string' || !/^T-(?:\d{6,}|[A-Z0-9]{2,4}-\d{4,6})$/.test(ticketId) || typeof read !== 'string' || !/^[A-Z0-9]{0,20}$/.test(read)
+      if (typeof ticketId !== 'string' || !anyTicketId.test(ticketId) || typeof read !== 'string' || !/^[A-Z0-9]{0,20}$/.test(read)
         || typeof image !== 'string' || image.length > 90_000 || !/^[A-Za-z0-9+/=]+$/.test(image)) return reply({ error: 'Invalid scan.' }, 400)
       const bytes = Uint8Array.from(atob(image), c => c.charCodeAt(0))
       if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return reply({ error: 'The scan picture must be a JPEG.' }, 400)

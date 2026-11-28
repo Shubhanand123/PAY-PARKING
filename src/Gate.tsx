@@ -14,6 +14,7 @@ import {
   isSupportedPlateFormat, normPlate, prepaidPrice, fmtDate, prettyPlate, rupees, freeVehicleFor, paidOnPhone, paidUntil, type DB, type Receipt, type Staff, type Ticket,
 } from './engine'
 import { printSlip } from './print'
+import { readTicketQuery } from './numbers'
 import { Ico, Pill, QR, ticketUrl, useNow } from './ui'
 import { saveStart, saveEnd, saveFloat } from './done'
 import { cashCelebrate } from './celebrate'
@@ -352,7 +353,9 @@ export function Exit({ db, me, toast, onFlow }: { db: DB; me: Staff; toast: (m: 
     if (how !== 'plate') {
       const ticket = findTicketBySlip(db.tickets, s)
       if (ticket) return open(ticket, 'qr')
-      if (how === 'qr' || /^T-?\d+$|#\/t\//i.test(s)) {
+      const tq = readTicketQuery(s)
+      if (tq.kind === 'bad-check') return toast(`${tq.id} is not a valid ticket number (check digit). Did you mean ${tq.fixed}?`, true)
+      if (how === 'qr' || tq.kind !== 'none' || /#\/t\//i.test(s)) {
         return toast('No ticket with that QR or number.', true)
       }
     }

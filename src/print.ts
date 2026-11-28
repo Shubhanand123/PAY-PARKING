@@ -24,7 +24,7 @@ export function warmPrinter() {
     const probe = document.createElement('div')
     probe.className = 'slip slip-print'
     probe.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + DOTS + 'px'
-    probe.innerHTML = '<b class="slip-h">PARKER</b><div class="slip-row"><span>Ticket</span><b>T-000000</b></div>'
+    probe.innerHTML = '<b class="slip-h">PARKER</b><div class="slip-row"><span>Ticket</span><b>SKC-GA1-2611-00000-0</b></div>'
     document.body.append(probe)
     void fontCss(probe).finally(() => probe.remove())
   }
