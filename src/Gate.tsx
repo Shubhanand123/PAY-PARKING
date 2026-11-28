@@ -29,6 +29,7 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
   return (
     <div className="slip" aria-label="Receipt">
       <div className="slip-sim">58 mm</div>
+      <img className="slip-logo" src="skc.png" alt="SKC" />
       <b className="slip-h">{r.operator}</b>
       <div>{r.siteName}</div>
       <div className="slip-s">{r.address}</div>
@@ -50,7 +51,8 @@ function ReceiptCopy({ db, r, t }: { db: DB; r: Receipt; t: Ticket }) {
       {r.payments.length > 0 && <div className="slip-paid-h">PAYMENTS</div>}
       {r.payments.map((p, i) => <div key={i} className="slip-row"><span>{paidBy(p)}</span><b>{rupees(p.amountPaise)}</b></div>)}
       {r.free && <div className="slip-free">Free vehicle · {r.free.reason}<br />{rupees(r.free.waivedPaise)} waived</div>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>Scan to see this receipt on your phone, or to give feedback or raise a complaint.{tv && rt ? ` Rates: ${rupees(rt.firstPaise)} for the first ${rt.firstHours}h, then ${rupees(rt.perHourPaise)}/hr.` : ''}</span></div>
+      <div className="slip-feedback"><b>Feedback or complaint?</b><br />Scan the QR above · we reply on that page</div>
       <div className="slip-foot"><b>Thank you for parking with us!</b><br />Drive safe · Issued by {r.issuedBy}</div>
     </div>
   )
@@ -66,6 +68,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
   return (
     <div className="slip" aria-label={receipt ? 'Receipt preview' : 'Entry slip preview'}>
       <div className="slip-sim">58 mm</div>
+      <img className="slip-logo" src="skc.png" alt="SKC" />
       <b className="slip-h">{db.settings.operator}</b>
       <div>{db.settings.siteName}</div>
       <div className="slip-s">{db.settings.address}</div>
@@ -101,7 +104,7 @@ export function Slip({ db, t, receipt }: { db: DB; t: Ticket; receipt?: boolean 
           {t.prepaidHours > 0 && <><br />Prepaid time is not refunded; extra time is charged at exit.</>}
         </div>
       </>}
-      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to check your time and amount to pay.' : 'Scan to see your receipt and pay.'}</span></div>
+      <div className="slip-qr-row"><QR text={ticketUrl(t.token)} size={96} /><span>{receipt ? 'Scan to see this receipt, or to give feedback or raise a complaint.' : 'Scan to see your receipt and pay.'}</span></div>
       {!receipt && <div className="slip-foot"><b>Keep this slip safe.</b><br />Show it at the exit gate.<br />Thank you · Drive safe</div>}
     </div>
   )

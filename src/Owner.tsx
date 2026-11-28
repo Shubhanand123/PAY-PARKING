@@ -3,11 +3,12 @@ import { apiEnabled, callParking, openAccess } from './parking-api'
 import { publishTariff, saveSettings } from './actions'
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
-  activeTariff, billFor, charge, dur, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
+  activeTariff, billFor, charge, dur, findTicketBySlip, fmtDT, fmtTime, istDay, istHour, prettyPlate, rupees,
   type AuditKind, type DB, type Rate, type Settings, type Staff, type Ticket,
 } from './engine'
 import { Ico, Pill, QR, useNow } from './ui'
-import { StatusPill } from './Gate'
+import { Slip, StatusPill } from './Gate'
+import { readTicketQuery } from './numbers'
 import { saveStart, saveEnd } from './done'
 import { Customers, FreeVehicles, OfflineChecks, TicketPaper } from './OwnerExtras'
 
@@ -198,17 +199,20 @@ function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?
   const [q, setQ] = useState('')
   const [st, setSt] = useState<'all' | Ticket['status']>('all')
   const [open, setOpen] = useState<string | null>(null)
-  const list = db.tickets.filter(t => (st === 'all' || t.status === st) && (!q || t.plate.includes(q.toUpperCase().replace(/[^A-Z0-9]/g, '')) || t.id.includes(q.toUpperCase()))).slice().reverse()
+  const exact = q ? findTicketBySlip(db.tickets, q) : undefined // full SKC number, short number ("142") or old T- number
+  const tq = q ? readTicketQuery(q) : undefined
+  const list = db.tickets.filter(t => (st === 'all' || t.status === st) && (!q || t === exact || t.plate.includes(q.toUpperCase().replace(/[^A-Z0-9]/g, '')) || t.id.includes(q.toUpperCase()))).slice().reverse()
   const sel = open ? db.tickets.find(t => t.id === open) : undefined
   return (
     <div className="stack">
       <div className="card toolbar">
-        <input className="field small-field" placeholder="Search plate or ticket" value={q} onChange={e => setQ(e.target.value)} />
+        <input className="field small-field" placeholder="Search plate or ticket no. (e.g. 142)" value={q} onChange={e => setQ(e.target.value)} />
         <select className="field small-field" value={st} onChange={e => setSt(e.target.value as typeof st)}>
           <option value="all">All</option><option value="inside">Inside</option><option value="paid">Paid, not left</option><option value="exited">Closed</option><option value="cancelled">Cancelled</option>
         </select>
         <button className="btn btn-ghost fit" onClick={() => csv(db)}><Ico n="dl" /> Today's CSV</button>
       </div>
+      {tq?.kind === 'bad-check' && <p className="msg bad" role="alert">{tq.id} is not a valid ticket number (check digit). Did you mean <button className="link" onClick={() => setQ(tq.fixed)}>{tq.fixed}</button>?</p>}
       <div className="card table-card">
         <table className="tbl">
           <thead><tr><th>Ticket</th><th>Plate</th><th>Type</th><th>Entry</th><th>Exit</th><th className="r">Amount</th><th>Status</th></tr></thead>
@@ -220,13 +224,44 @@ function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?
         </table>
         {!list.length && <Empty text="No tickets match." />}
       </div>
-      {sel && <div className="grid2">
-        <div className="card"><h2>History of {sel.id}</h2>{db.audit.filter(a => a.ticketId === sel.id).map(a => <AuditRow key={a.id} a={a} />)}</div>
-        <TicketPaper db={db} t={sel} me={me} toast={toast} />
+      {sel && <TicketDetail db={db} t={sel} me={me} toast={toast} />}
+    </div>
+  )
+}
+
+/** One ticket: the slip exactly as printed, the frozen receipt, and everything that happened to it. */
+function TicketDetail({ db, t, me, toast }: { db: DB; t: Ticket; me: Staff; toast: (m: string, bad?: boolean) => void }) {
+  const paid = t.status === 'paid' || t.status === 'exited'
+  const [view, setView] = useState<'slip' | 'receipt' | 'history'>(paid ? 'receipt' : 'slip')
+  const [server, setServer] = useState<HistoryEvent[] | null>(null)
+  useEffect(() => {
+    setServer(null)
+    if (!apiEnabled) return
+    let alive = true
+    void callParking<HistoryEvent[]>('ticketHistory', [t.id]).then(r => { if (alive) setServer(r.result) }).catch(() => {})
+    return () => { alive = false }
+  }, [t.id])
+  const local: HistoryEvent[] = db.audit.filter(a => a.ticketId === t.id).map(a => ({ id: a.id, at: a.at, by: a.by, kind: a.kind, text: a.text }))
+  const events = (server && server.length >= local.length ? server : local).slice().sort((a, b) => a.at - b.at)
+  return (
+    <div className="card ticket-detail">
+      <div className="row-between"><h2 className="num">{t.id}</h2><StatusPill t={t} /></div>
+      <div className="seg" role="tablist">
+        <button className={view === 'slip' ? 'on' : ''} onClick={() => setView('slip')}>Entry slip</button>
+        <button className={view === 'receipt' ? 'on' : ''} onClick={() => setView('receipt')} disabled={!paid}>Receipt</button>
+        <button className={view === 'history' ? 'on' : ''} onClick={() => setView('history')}>History · {events.length}</button>
+      </div>
+      {view === 'slip' && <div className="paper"><Slip db={db} t={t} /><p className="tiny muted center">Exact slip as printed · printed {t.prints}×{t.prints > 1 ? ` (${t.prints - 1} reprint${t.prints > 2 ? 's' : ''})` : ''}</p></div>}
+      {view === 'receipt' && paid && <TicketPaper db={db} t={t} me={me} toast={toast} />}
+      {view === 'history' && <div className="history">
+        {events.map(e => <AuditRow key={e.id} a={{ id: e.id, at: e.at, by: e.by, kind: e.kind as AuditKind, text: e.text, ticketId: t.id }} />)}
+        {!events.length && <Empty text="Nothing recorded for this ticket yet." />}
+        <p className="tiny muted">🔒 {server ? 'From the permanent history: entries cannot be changed or deleted.' : 'Entries are kept permanently and cannot be changed.'}</p>
       </div>}
     </div>
   )
 }
+type HistoryEvent = { id: string; at: number; by: string; kind: string; text: string }
 
 function csv(db: DB) {
   const today = istDay(Date.now())
