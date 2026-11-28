@@ -27,7 +27,10 @@ cmp <(cut -d, -f2 anpr/ocrdata/synth.csv) <(cut -d, -f2 repo/training/labels/syn
 if [ -z "$SKIP_PHOTOS" ]; then
 mkdir -p raw; get() {  # up to 4 tries: a server sometimes answers with an error page instead of the zip
   mkdir -p raw/$1; for try in 1 2 3 4; do
-    curl -sL --retry 3 -o raw/$1/d.zip "$2" && python -c "import zipfile,sys; sys.exit(not zipfile.is_zipfile('raw/$1/d.zip'))" && (cd raw/$1 && python -m zipfile -e d.zip . && rm d.zip) && return 0
+    curl -sL --retry 3 -o raw/$1/d.zip "$2"
+    # Mendeley sometimes answers with {"status":"OK","url":"<the file on S3>"}: follow it
+    u=; [ "$(stat -c%s raw/$1/d.zip 2>/dev/null || echo 0)" -lt 10000 ] && u=$(python -c "import json; print(json.load(open('raw/$1/d.zip')).get('url', ''))" 2>/dev/null); [ -n "$u" ] && curl -sL --retry 3 -o raw/$1/d.zip "$u"
+    python -c "import zipfile,sys; sys.exit(not zipfile.is_zipfile('raw/$1/d.zip'))" && (cd raw/$1 && python -m zipfile -e d.zip . && rm d.zip) && return 0
     log "download $1: try $try failed ($(head -c 120 raw/$1/d.zip 2>/dev/null | tr -dc '[:print:]'))"; sleep $((try * 20)); done
   fail "download $1"; }
 get payals "$RF_PAYALS"; get merged "$RF_MERGED"; get kp1 "$RF_KP1"; get kp2 "$RF_KP2"
