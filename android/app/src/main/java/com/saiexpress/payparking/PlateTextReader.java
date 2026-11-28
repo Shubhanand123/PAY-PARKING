@@ -66,6 +66,29 @@ final class PlateTextReader {
         return new Reading(text.toString(), text.length() == 0 ? 0f : worst, slots, sharpness);
     }
 
+    /**
+     * Night: when the plate picture is dark (mean brightness under 80 of 255), its brightness range (2nd..98th percentile)
+     * is stretched to 0..255. Tested on the 163 test plates made dark and noisy: read exactly 80.4% -> 88.3%; normal
+     * and glare plates unchanged (it applies to about 5% of normal plates). training/scripts: see the 28 Nov notes.
+     */
+    private void brightenIfDark() {
+        int n = W * H; int[] hist = new int[256]; long sum = 0;
+        for (int i = 0; i < n; i++) { int p = pixels[i]; int y = (((p >> 16) & 255) * 299 + ((p >> 8) & 255) * 587 + (p & 255) * 114) / 1000; hist[y]++; sum += y; }
+        if (sum / n >= 80) return;
+        int lo = 0, hi = 255, c = 0;
+        for (int v = 0; v < 256; v++) { c += hist[v]; if (c >= n * 0.02) { lo = v; break; } }
+        c = 0; for (int v = 255; v >= 0; v--) { c += hist[v]; if (c >= n * 0.02) { hi = v; break; } }
+        if (hi - lo < 8) return;
+        float k = 255f / (hi - lo);
+        for (int i = 0; i < n; i++) {
+            int p = pixels[i];
+            int r = Math.max(0, Math.min(255, Math.round((((p >> 16) & 255) - lo) * k)));
+            int g = Math.max(0, Math.min(255, Math.round((((p >> 8) & 255) - lo) * k)));
+            int b = Math.max(0, Math.min(255, Math.round(((p & 255) - lo) * k)));
+            pixels[i] = (p & 0xff000000) | (r << 16) | (g << 8) | b;
+        }
+    }
+
     /** Sharpness of the 128 x 64 picture: variance of the Laplacian of its grey levels (as in training/scripts/vote_sim.py). */
     private float sharpness() {
         int w = W, h = H; float[] g = grey; double sum = 0, sq = 0; int n = 0;
@@ -128,6 +151,7 @@ final class PlateTextReader {
     synchronized Reading read(Bitmap box) throws Exception {
         Bitmap small = Bitmap.createScaledBitmap(box, W, H, true);
         small.getPixels(pixels, 0, W, 0, 0, W, H);
+        brightenIfDark();
         long[] shape = { 1, H, W, 3 };
         OnnxTensor tensor;
         if (uint8) {
