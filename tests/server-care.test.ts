@@ -28,7 +28,7 @@ test('server: complaints, privacy of owner data, reports, day closing and histor
     if (url.pathname.startsWith('/storage/v1/object/complaints/')) { uploads.push(url.pathname); return Response.json({}) }
     if (url.pathname === '/storage/v1/object/complaints' && options?.method === 'DELETE') { deleted.push(...JSON.parse(String(options.body)).prefixes); return Response.json({}) }
     if (url.pathname.startsWith('/storage/v1/object/sign/complaints/')) return Response.json({ signedURL: '/object/sign/complaints/x.jpg?token=abc' })
-    if (url.pathname === '/rest/v1/parking_events' || url.pathname === '/rest/v1/parking_tickets') return new Response('relation does not exist', { status: 404 }) // migration not applied yet
+    if (url.pathname === '/rest/v1/parking_events' || url.pathname === '/rest/v1/parking_ticket_history') return new Response('relation does not exist', { status: 404 }) // migration not applied yet
     return Response.json([])
   }
   const jwt = 'x.' + btoa(JSON.stringify({ session_id: 's1' })) + '.y'
