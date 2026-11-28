@@ -15,7 +15,7 @@ $A/tfenv/bin/python -c "from fast_plate_ocr.train.model import layers; import on
 NC=$(nproc); log "cpus $NC"
 
 log "1. blur-heavy synthetic plates"
-J=$NC bash $P/synth_many.sh $A/anpr/ocrdata ${SYNTH2_N:-180000} 1 2>&1 | tail -1 | tee -a night.log
+J=$(( NC > 16 ? 16 : NC )) bash $P/synth_many.sh $A/anpr/ocrdata ${SYNTH2_N:-180000} 1 2>&1 | tail -1 | tee -a night.log
 log "1. reader retrain (from v4) starts"
 (cd $A/anpr && TF_FORCE_GPU_ALLOW_GROWTH=true SELECT=mixblur BLUR_P=${BLUR_P:-0.5} BLUR_MAX=${BLUR_MAX:-11} STRAIGHT=0.5 CORNER_ERR=0.024 SYNTH=${SYNTH:-30000} \
   RESUME=$A/anpr/reader_v4.keras OUT=reader_v5.keras PEAK_LR=${READER_LR:-1e-4} $A/tfenv/bin/python -u $P/train.py $A/anpr ${READER_EPOCHS:-30} > $A/reader.log 2>&1 \

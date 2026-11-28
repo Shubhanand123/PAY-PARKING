@@ -4,7 +4,8 @@
 # Env (set on the pod): REPO_COMMIT, RF_PAYALS, RF_MERGED, RF_KP1, RF_KP2 (Roboflow export download links, CC BY 4.0 sets).
 A=/workspace; O=$A/out; mkdir -p $O; cd $A
 exec > >(tee -a $O/boot.log) 2>&1
-(cd $O && python -m http.server 8000 >/dev/null 2>&1 &)
+# read-only file server for logs/models: restarts if it dies, and is the last thing the out-of-memory killer picks
+(cd $O && while true; do python -m http.server 8000 >/dev/null 2>&1 & echo -1000 > /proc/$!/oom_score_adj 2>/dev/null; wait $!; sleep 3; done) &
 log() { echo "$(date +%H:%M:%S) $*"; }
 fail() { log "FAILED: $*"; touch $O/FAILED; sleep 1800; command -v runpodctl && runpodctl stop pod $RUNPOD_POD_ID; exit 1; }
 log "boot, commit $REPO_COMMIT"
@@ -41,7 +42,7 @@ mkdir -p weights && curl -sL -o weights/yolox_nano.pth https://github.com/Megvii
 fi
 log "data ready: $(du -sh det anpr | tr '\n' ' ')"
 # logs to the shared folder every minute while training
-(while true; do cp -f $A/*.log $O/ 2>/dev/null; sleep 60; done) &
+(while true; do cp -f $A/*.log $O/ 2>/dev/null; { date +%H:%M; free -g | sed -n 2p; df -h / | tail -1; } >> $O/resources.log; sleep 60; done) &
 timeout 6h bash scripts/${JOB:-night6}.sh || log "${JOB:-night6} ended with an error or after 6 h"
 cp -f $A/*.log $O/
 cp -f runs/finder/finder_best.pt runs/corners1/corners_best.pt $O/ 2>/dev/null; cp -f runs/corners2/corners_best.pt $O/corners2_best.pt 2>/dev/null
