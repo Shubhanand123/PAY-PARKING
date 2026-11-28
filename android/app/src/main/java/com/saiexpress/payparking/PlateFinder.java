@@ -14,9 +14,6 @@ import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.util.Collections;
 
-import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OrtEnvironment;
-import ai.onnxruntime.OrtSession;
 
 /**
  * Finds the number plate in a camera picture (YOLOX-nano, 224 x 224, Apache-2.0, trained by us on Indian plate photos:
@@ -33,16 +30,15 @@ final class PlateFinder {
     private static boolean failed;
     private int errors;
 
-    private final OrtEnvironment env;
-    private final OrtSession session;
-    private final String inputName;
+    private final org.tensorflow.lite.Interpreter tfl;
     final String engine; // shown in the timing line
     private final int SIZE; // from the model: 224 (YOLOX) or 256 (old YOLOv9)
     private final Bitmap board;
     private final Canvas canvas;
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final int[] pixels;
-    private final FloatBuffer input;
+    private final java.nio.ByteBuffer input;
+    private final float[][] rows;
 
     // Crash guard: a flag is written before the model first loads and runs, and cleared once it has worked.
     // If the app is killed in between (a native crash), the flag is still there at the next start and the finder
@@ -70,24 +66,15 @@ final class PlateFinder {
     }
 
     private PlateFinder(Context context) throws Exception {
-        byte[] model = read(context, "models/plate_finder_224.onnx");
-        GUARD.step(context, "engine start");
-        env = OrtEnvironment.getEnvironment();
-        // CPU only: the AI-chip path (NNAPI) crashed the whole app on a POS (a native crash that can't be caught).
-        OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-        cpu.setIntraOpNumThreads(1);
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
-        cpu.setCPUArenaAllocator(false); cpu.setMemoryPatternOptimization(false); // low-memory POS: no big blocks reserved in advance
         GUARD.step(context, "model load");
-        OrtSession s = env.createSession(model, cpu);
-        String used = "CPU";
-        session = s;
-        engine = used;
-        inputName = session.getInputNames().iterator().next();
-        long[] shape = ((ai.onnxruntime.TensorInfo) session.getInputInfo().get(inputName).getInfo()).getShape();
-        SIZE = (int) shape[2];
+        tfl = Tfl.open(context, "models/plate_finder_224.tflite");
+        engine = "TFLite";
+        int[] shape = tfl.getInputTensor(0).shape(); // [1, 224, 224, 3]
+        SIZE = shape[1];
+        int[] outShape = tfl.getOutputTensor(0).shape();
+        rows = new float[outShape[0]][outShape[1]];
         board = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888); canvas = new Canvas(board);
-        pixels = new int[SIZE * SIZE]; input = FloatBuffer.allocate(3 * SIZE * SIZE);
+        pixels = new int[SIZE * SIZE]; input = Tfl.floats(3 * SIZE * SIZE);
         GUARD.step(context, "first run");
         find(Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)); // first run is slow: do it now, not on the first vehicle
     }
@@ -101,8 +88,8 @@ final class PlateFinder {
     }
 
     /** Runs the model. If it keeps failing, the finder is switched off for this session. */
-    private OrtSession.Result run(OnnxTensor tensor) throws Exception {
-        try { return session.run(Collections.singletonMap(inputName, tensor)); }
+    private void run() throws Exception {
+        try { tfl.run(input, rows); }
         catch (Exception e) {
             if (++errors >= 3) {
                 Log.w(TAG, "Plate finder keeps failing: switched off for this session: " + e);
@@ -136,18 +123,14 @@ final class PlateFinder {
         m.postTranslate(dx, dy);
         canvas.drawBitmap(raw, m, paint);
         board.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE);
-        input.clear();
-        float[] data = input.array();
-        int plane = SIZE * SIZE;
-        for (int i = 0; i < plane; i++) {
+        input.rewind();
+        for (int i = 0; i < SIZE * SIZE; i++) { // NHWC, 0..1
             int p = pixels[i];
-            data[i] = ((p >> 16) & 0xff) / 255f;
-            data[plane + i] = ((p >> 8) & 0xff) / 255f;
-            data[2 * plane + i] = (p & 0xff) / 255f;
+            input.putFloat(((p >> 16) & 0xff) / 255f); input.putFloat(((p >> 8) & 0xff) / 255f); input.putFloat((p & 0xff) / 255f);
         }
-        try (OnnxTensor tensor = OnnxTensor.createTensor(env, input, new long[] { 1, 3, SIZE, SIZE });
-             OrtSession.Result out = run(tensor)) {
-            float[][] rows = (float[][]) out.get(0).getValue(); // YOLOX: [x1, y1, x2, y2, score]; old: [batch, x1, y1, x2, y2, class, score]
+        input.rewind();
+        run();
+        {
             Rect best = null;
             double bestScore = -1;
             for (float[] row : rows) {

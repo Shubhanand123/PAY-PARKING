@@ -11,12 +11,6 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.Collections;
 
-import ai.onnxruntime.NodeInfo;
-import ai.onnxruntime.OnnxJavaType;
-import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OrtEnvironment;
-import ai.onnxruntime.OrtSession;
-import ai.onnxruntime.TensorInfo;
 
 /**
  * Reads the characters of a plate box (from PlateFinder) with our own model, trained on Indian plates
@@ -26,6 +20,9 @@ import ai.onnxruntime.TensorInfo;
  */
 final class PlateTextReader {
     private static final String TAG = "PlateTextReader";
+    private org.tensorflow.lite.Interpreter tfl;
+    private final java.nio.ByteBuffer in8 = java.nio.ByteBuffer.allocateDirect(128 * 64 * 3).order(java.nio.ByteOrder.nativeOrder());
+    private final float[][][] out = new float[1][10][37];
     private static final String ALPHA = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
     private static final int W = 128, H = 64;
     static final ModelGuard GUARD = new ModelGuard("reader");
@@ -102,10 +99,6 @@ final class PlateTextReader {
     private static volatile PlateTextReader shared;
     private static boolean failed;
 
-    private final OrtEnvironment env;
-    private final OrtSession session;
-    private final String inputName;
-    private final boolean uint8;
     private final int[] pixels = new int[W * H];
     private final float[] grey = new float[W * H];
 
@@ -127,23 +120,8 @@ final class PlateTextReader {
     }
 
     private PlateTextReader(Context context) throws Exception {
-        byte[] model;
-        try (InputStream in = context.getAssets().open("models/plate_reader_in.onnx"); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[1 << 16];
-            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-            model = out.toByteArray();
-        }
-        GUARD.step(context, "engine start");
-        env = OrtEnvironment.getEnvironment();
-        OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-        cpu.setIntraOpNumThreads(1);
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
-        cpu.setCPUArenaAllocator(false); cpu.setMemoryPatternOptimization(false); // low-memory POS: no big blocks reserved in advance
         GUARD.step(context, "model load");
-        session = env.createSession(model, cpu);
-        inputName = session.getInputNames().iterator().next();
-        NodeInfo info = session.getInputInfo().get(inputName);
-        uint8 = info.getInfo() instanceof TensorInfo && ((TensorInfo) info.getInfo()).type == OnnxJavaType.UINT8;
+        tfl = Tfl.open(context, "models/plate_reader.tflite");
         GUARD.step(context, "first run");
         read(Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)); // warm up
     }
@@ -153,21 +131,12 @@ final class PlateTextReader {
         Bitmap small = Bitmap.createScaledBitmap(box, W, H, true);
         small.getPixels(pixels, 0, W, 0, 0, W, H);
         brightenIfDark();
-        long[] shape = { 1, H, W, 3 };
-        OnnxTensor tensor;
-        if (uint8) {
-            ByteBuffer b = ByteBuffer.allocateDirect(W * H * 3).order(ByteOrder.nativeOrder());
-            for (int p : pixels) { b.put((byte) ((p >> 16) & 0xff)); b.put((byte) ((p >> 8) & 0xff)); b.put((byte) (p & 0xff)); }
-            b.rewind();
-            tensor = OnnxTensor.createTensor(env, b, shape, OnnxJavaType.UINT8);
-        } else {
-            FloatBuffer f = FloatBuffer.allocate(W * H * 3);
-            for (int p : pixels) { f.put((p >> 16) & 0xff); f.put((p >> 8) & 0xff); f.put(p & 0xff); }
-            f.rewind();
-            tensor = OnnxTensor.createTensor(env, f, shape);
-        }
-        try (OnnxTensor t = tensor; OrtSession.Result out = session.run(Collections.singletonMap(inputName, t))) {
-            float[][] slots = ((float[][][]) out.get(0).getValue())[0]; // [10][37] probabilities
+        in8.rewind();
+        for (int p : pixels) { in8.put((byte) ((p >> 16) & 0xff)); in8.put((byte) ((p >> 8) & 0xff)); in8.put((byte) (p & 0xff)); }
+        in8.rewind();
+        tfl.run(in8, out);
+        {
+            float[][] slots = out[0]; // [10][37] probabilities
             return decode(slots, sharpness());
         }
     }

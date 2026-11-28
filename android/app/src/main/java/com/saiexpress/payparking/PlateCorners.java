@@ -12,9 +12,6 @@ import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.util.Collections;
 
-import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OrtEnvironment;
-import ai.onnxruntime.OrtSession;
 
 /**
  * Finds the 4 corners of the plate inside the finder's (grown) box and warps the plate flat, straight to the
@@ -32,11 +29,10 @@ final class PlateCorners {
     private static volatile PlateCorners shared;
     private static boolean failed;
 
-    private final OrtEnvironment env;
-    private final OrtSession session;
-    private final String inputName;
+    private final org.tensorflow.lite.Interpreter tfl;
+    private final float[][] out8 = new float[1][8];
     private final int[] pixels = new int[W * H];
-    private final FloatBuffer input = FloatBuffer.allocate(3 * W * H);
+    private final java.nio.ByteBuffer input = Tfl.floats(3 * W * H);
 
     static PlateCorners ready() { return shared; }
 
@@ -56,21 +52,8 @@ final class PlateCorners {
     }
 
     private PlateCorners(Context context) throws Exception {
-        byte[] model;
-        try (InputStream in = context.getAssets().open("models/plate_corners.onnx"); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[1 << 16];
-            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-            model = out.toByteArray();
-        }
-        GUARD.step(context, "engine start");
-        env = OrtEnvironment.getEnvironment();
-        OrtSession.SessionOptions cpu = new OrtSession.SessionOptions();
-        cpu.setIntraOpNumThreads(1);
-        cpu.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
-        cpu.setCPUArenaAllocator(false); cpu.setMemoryPatternOptimization(false); // low-memory POS: no big blocks reserved in advance
         GUARD.step(context, "model load");
-        session = env.createSession(model, cpu);
-        inputName = session.getInputNames().iterator().next();
+        tfl = Tfl.open(context, "models/plate_corners.tflite");
         GUARD.step(context, "first run");
         flatten(Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)); // warm up
     }
@@ -80,20 +63,14 @@ final class PlateCorners {
         Bitmap small = Bitmap.createScaledBitmap(band, W, H, true);
         small.getPixels(pixels, 0, W, 0, 0, W, H);
         if (small != band) small.recycle();
-        input.clear();
-        float[] data = input.array();
-        int plane = W * H;
-        for (int i = 0; i < plane; i++) {
+        input.rewind();
+        for (int i = 0; i < W * H; i++) { // NHWC, 0..1
             int p = pixels[i];
-            data[i] = ((p >> 16) & 0xff) / 255f;
-            data[plane + i] = ((p >> 8) & 0xff) / 255f;
-            data[2 * plane + i] = (p & 0xff) / 255f;
+            input.putFloat(((p >> 16) & 0xff) / 255f); input.putFloat(((p >> 8) & 0xff) / 255f); input.putFloat((p & 0xff) / 255f);
         }
-        float[] q;
-        try (OnnxTensor t = OnnxTensor.createTensor(env, input, new long[] { 1, 3, H, W });
-             OrtSession.Result out = session.run(Collections.singletonMap(inputName, t))) {
-            q = ((float[][]) out.get(0).getValue())[0];
-        }
+        input.rewind();
+        tfl.run(input, out8);
+        float[] q = out8[0];
         float bw = band.getWidth(), bh = band.getHeight();
         float[] src = { q[0] * bw, q[1] * bh, q[2] * bw, q[3] * bh, q[4] * bw, q[5] * bh, q[6] * bw, q[7] * bh };
         float[] dst = { MX * OUT_W, MY * OUT_H, (1 - MX) * OUT_W, MY * OUT_H, (1 - MX) * OUT_W, (1 - MY) * OUT_H, MX * OUT_W, (1 - MY) * OUT_H };

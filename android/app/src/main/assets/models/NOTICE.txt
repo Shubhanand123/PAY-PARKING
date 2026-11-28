@@ -23,3 +23,5 @@ Copyright (c) ankandrew, https://github.com/ankandrew/fast-plate-ocr), fine-tune
    https://universe.roboflow.com/anpr-tsug0/license-plate-eq813
  - synthetic Indian plates generated for this app.
 Test result (163 unseen Indian plates): 87.1% read exactly; when it is at least 95% sure: 131 of 131 right.
+
+TensorFlow Lite (LiteRT) runtime: Apache License 2.0, (c) The TensorFlow Authors. Models converted from the ONNX/Keras originals in training/models (same results on the 163 test plates).
