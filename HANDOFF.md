@@ -1,5 +1,7 @@
 # PARKER — handoff for a new Claude session (28 Nov 2026)
 
+**LIVE since 28 Nov 2026, 8:00 pm IST (owner said "go live"):** migrations 202611280001 (history tables renamed parking_ticket_history / parking_payment_history because old empty parking_tickets/parking_payments exist) and 202611280002 applied; Edge Function v8 = commit d04db1f; website = d04db1f. APK update button still 3.9; release APK 3.14 (versionCode 35) sent to the owner for a POS test — publish it on the update button only after the owner confirms the scanner works.
+
 Work branch: `claude/receipts`. Live site = branch `codex/pay-parking-live` (Cloudflare Pages). **Do not push to the live branch, deploy the Edge Function, or apply new migrations until the owner has tested and says "go live".**
 
 ## Live now
