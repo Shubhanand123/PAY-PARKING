@@ -72,3 +72,14 @@ round 3 (no Kaggle, mixed selection) mixed 0.889. Logs in `logs/`. The Kaggle se
 
 Note: 86 of the 163 test plates (and 322 of 500 val) have a number that is also in train.csv (same vehicle, another video
 frame), so test numbers flatter the reader; `UNSEEN_ONLY=labels/train.csv pipeline_eval.py` gives the 77 others.
+
+
+## 28 Nov 2026: moving / blurry plates (1 x RTX 4090) — results
+- App side (no training), simulated on the 163 test plates with motion blur 6-16 px (`vote_sim.py`): sharpest frame + letter vote
+  across frames filled in 71% of plates with 2 wrong (one frame: 56%, 2 wrong) -> app 3.13.
+- Night: stretching the brightness of dark plate pictures (`night_eval.py`): dark test plates 80.4% -> 88.3%, normal/glare unchanged -> app 3.14.
+- Reader with 1.5 lakh blur-heavy synthetic plates (`synth_many.sh`, `SELECT=mixblur`): fast motion (16 px) val 60.4% -> 65.6%,
+  but plain val 92.0% -> 89.2%; never beat v4 on the combined score -> v4 stays (`logs/night7_reader.log`).
+- CCPD (MIT, ~40k photos with exact corners) added to the corner model: corner error 2.8% vs 2.2-2.4% before -> not kept.
+  Finder with CCPD: 18 min per epoch on that pod; stopped after 3 epochs (val below the current finder) -> not kept.
+- Downloads: Mendeley refuses Runpod machines (502 / JSON pointer); `NPDS_URL` = the S3 file it points to works.

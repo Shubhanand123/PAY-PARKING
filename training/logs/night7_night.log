@@ -1,0 +1,23 @@
+10:54:26 setup
+torch 2.4.1+cu124 NVIDIA GeForce RTX 4090
+reader packages ok, gpus 1
+11:10:41 cpus 128
+11:10:41 1. blur-heavy synthetic plates
+synthetic plates (set 2): 151499
+11:28:24 1. reader retrain (from v4) starts
+11:28:24 2. CCPD download
+11:31:39 CCPD downloaded: 13G
+12:59:47 CCPD extracted: 25G
+ccpd_base: 12000 photos
+ccpd_blur: 6000 photos
+ccpd_tilt: 6000 photos
+ccpd_rotate: 4000 photos
+ccpd_challenge: 4000 photos
+ccpd_db: 3000 photos
+ccpd_fn: 3000 photos
+ccpd_weather: 2000 photos
+ccpd_green: 0 photos
+CCPD photos added to train: 40000
+13:09:00 3. finder + corner model fine-tune (CCPD added: 1)
+13:24:21 reader done: FINAL no epoch beat the starting model: nothing saved
+13:40:10 corners done: epoch 20/20 loss 0.0155 real corners (hand-labelled, val+test): 2.8% (box alone 7.1%) | real corners, turned 20-50 deg: 2.8% (box alone 10.1%) | 163 test plates, turned 20-50 deg: 8.2% (box alone 11.5%) 72s

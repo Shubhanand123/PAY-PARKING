@@ -1,0 +1,10 @@
+train photos 46717 val photos 381 device cuda
+COCO weights loaded: 636 of 642
+/workspace/scripts/yolox_train.py:125: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  if os.environ.get('INIT'): model.load_state_dict(torch.load(os.environ['INIT'], map_location='cpu')); print('continuing from', os.environ['INIT'], flush=True)
+continuing from /workspace/repo/training/models/finder_yolox224.pt
+/workspace/yolox_src/yolox/models/yolo_head.py:474: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+epoch 1/30 loss 2.412 val found 1.000 tight 0.958 best 1.958 1574s
+epoch 2/30 loss 2.046 val found 0.997 tight 0.929 best 1.958 1104s
+epoch 3/30 loss 1.991 val found 0.995 tight 0.942 best 1.958 1067s
