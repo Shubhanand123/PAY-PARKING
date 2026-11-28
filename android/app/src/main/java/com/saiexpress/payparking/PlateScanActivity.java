@@ -295,7 +295,7 @@ public class PlateScanActivity extends AppCompatActivity {
         if (finder != null) {
             try {
                 // The finder runs on every 2nd frame; between, the last box (under 0.2 s old) is reused, grown a bit more.
-                boolean reuse = (framesSeen % 2 == 0) && lastBox != null && System.currentTimeMillis() - lastBoxAt < 200;
+                boolean reuse = false; // 3.21: with ML Kit text off, the finder runs on every frame (the plate is found sooner)
                 Rect box = reuse ? lastBox : finder.find(raw, rotation);
                 if (!reuse) { lastBox = box; lastBoxAt = System.currentTimeMillis(); }
                 if (box != null && !reuse) focusOnPlate(box, rotation, raw.getWidth(), raw.getHeight());
@@ -385,7 +385,11 @@ public class PlateScanActivity extends AppCompatActivity {
         final int width = band.getWidth(), height = band.getHeight();
         final boolean usedFinder = boxed;
         final long t1 = System.nanoTime();
-        Task<Text> reading = text.process(InputImage.fromBitmap(band, 0));
+        // Speed: when our own models run, the slow ML Kit text reader (~2 s per picture on the POS, and it eats the CPU
+        // our models need) is skipped; it only helps when our models are off or nothing was read for 4 s.
+        boolean oursOk = PlateFinder.ready() != null && PlateTextReader.ready() != null;
+        boolean useMlText = !oursOk || (shownAt > 0 && System.currentTimeMillis() - shownAt > 4000);
+        Task<Text> reading = useMlText ? text.process(InputImage.fromBitmap(band, 0)) : Tasks.forException(new Exception("skipped"));
         Task<List<Barcode>> codes = qr != null ? qr.process(InputImage.fromBitmap(raw, rotation)) : Tasks.forResult(Collections.emptyList());
         Tasks.whenAllComplete(reading, codes).addOnCompleteListener(main::post, done -> {
             mlKitBusy.set(false);

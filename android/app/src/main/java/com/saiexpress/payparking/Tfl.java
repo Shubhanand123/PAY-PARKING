@@ -27,7 +27,7 @@ final class Tfl {
         ByteBuffer model = ByteBuffer.allocateDirect(bytes.length).order(ByteOrder.nativeOrder());
         model.put(bytes).rewind();
         Interpreter.Options o = new Interpreter.Options();
-        o.setNumThreads(2);
+        o.setNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors()))); // the POS has 4+ cores
         return new Interpreter(model, o);
     }
 
