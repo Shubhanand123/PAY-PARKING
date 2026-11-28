@@ -34,7 +34,7 @@ mkdir -p raw; get() {  # up to 4 tries: a server sometimes answers with an error
     log "download $1: try $try failed ($(head -c 120 raw/$1/d.zip 2>/dev/null | tr -dc '[:print:]'))"; sleep $((try * 20)); done
   fail "download $1"; }
 get payals "$RF_PAYALS"; get merged "$RF_MERGED"; get kp1 "$RF_KP1"; get kp2 "$RF_KP2"
-get npds "https://data.mendeley.com/public-files/datasets/sxrnr7hwtk/files/dbdc1d8c-8e79-464e-920d-6e298b31bcc7/file_downloaded"
+get npds "${NPDS_URL:-https://data.mendeley.com/public-files/datasets/sxrnr7hwtk/files/dbdc1d8c-8e79-464e-920d-6e298b31bcc7/file_downloaded}"  # NPDS_URL: e.g. the file on S3 that Mendeley points to
 python -I scripts/det_prep.py raw det | tee $O/det_prep.txt || fail "det_prep"
 git clone -q --depth 1 https://github.com/Megvii-BaseDetection/YOLOX yolox_src || fail "yolox clone"
 mkdir -p weights && curl -sL -o weights/yolox_nano.pth https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth || fail "yolox weights"
