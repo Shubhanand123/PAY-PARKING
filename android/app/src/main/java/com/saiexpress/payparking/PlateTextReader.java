@@ -30,7 +30,51 @@ final class PlateTextReader {
     private static final int W = 128, H = 64;
     private static final String PREFS = "plate_reader", TRYING = "trying_v1", OFF = "off_v1";
 
-    static final class Reading { final String text; final float confidence; Reading(String t, float c) { text = t; confidence = c; } }
+    static final class Reading {
+        final String text; final float confidence;
+        final float[][] slots;  // [10][37] letter probabilities (for voting across frames)
+        final float sharpness;  // Laplacian variance of the 128 x 64 picture that was read (higher = sharper)
+        Reading(String t, float c) { this(t, c, null, 0f); }
+        Reading(String t, float c, float[][] s, float sh) { text = t; confidence = c; slots = s; sharpness = sh; }
+    }
+
+    /** Letter-by-letter vote: each of the 10 slots adds up its probabilities over the frames (a moving vehicle, 2-4 frames). */
+    static Reading vote(java.util.List<Reading> frames) {
+        float[][] sum = null; int n = 0; float sharp = 0f;
+        for (Reading r : frames) {
+            if (r.slots == null) continue;
+            if (sum == null) sum = new float[r.slots.length][r.slots[0].length];
+            for (int i = 0; i < sum.length; i++) for (int k = 0; k < sum[i].length; k++) sum[i][k] += r.slots[i][k];
+            n++; sharp = Math.max(sharp, r.sharpness);
+        }
+        if (sum == null) return new Reading("", 0f);
+        for (float[] slot : sum) for (int k = 0; k < slot.length; k++) slot[k] /= n;
+        return decode(sum, sharp);
+    }
+
+    private static Reading decode(float[][] slots, float sharpness) {
+        StringBuilder text = new StringBuilder();
+        float worst = 1f;
+        for (float[] slot : slots) {
+            int best = 0;
+            for (int k = 1; k < slot.length; k++) if (slot[k] > slot[best]) best = k;
+            char c = ALPHA.charAt(best);
+            if (c == '_') continue; // padding
+            text.append(c);
+            worst = Math.min(worst, slot[best]);
+        }
+        return new Reading(text.toString(), text.length() == 0 ? 0f : worst, slots, sharpness);
+    }
+
+    /** Sharpness of the 128 x 64 picture: variance of the Laplacian of its grey levels (as in training/scripts/vote_sim.py). */
+    private float sharpness() {
+        int w = W, h = H; float[] g = grey; double sum = 0, sq = 0; int n = 0;
+        for (int i = 0; i < w * h; i++) { int p = pixels[i]; g[i] = (((p >> 16) & 255) * 299 + ((p >> 8) & 255) * 587 + (p & 255) * 114) / 1000f; }
+        for (int y = 1; y < h - 1; y++) for (int x = 1; x < w - 1; x++) {
+            int i = y * w + x; double l = g[i - 1] + g[i + 1] + g[i - w] + g[i + w] - 4 * g[i]; sum += l; sq += l * l; n++;
+        }
+        double m = sum / n; return (float) (sq / n - m * m);
+    }
 
     private static volatile PlateTextReader shared;
     private static boolean failed;
@@ -40,6 +84,7 @@ final class PlateTextReader {
     private final String inputName;
     private final boolean uint8;
     private final int[] pixels = new int[W * H];
+    private final float[] grey = new float[W * H];
 
     static PlateTextReader ready() { return shared; }
 
@@ -98,17 +143,7 @@ final class PlateTextReader {
         }
         try (OnnxTensor t = tensor; OrtSession.Result out = session.run(Collections.singletonMap(inputName, t))) {
             float[][] slots = ((float[][][]) out.get(0).getValue())[0]; // [10][37] probabilities
-            StringBuilder text = new StringBuilder();
-            float worst = 1f;
-            for (float[] slot : slots) {
-                int best = 0;
-                for (int k = 1; k < slot.length; k++) if (slot[k] > slot[best]) best = k;
-                char c = ALPHA.charAt(best);
-                if (c == '_') continue; // padding
-                text.append(c);
-                worst = Math.min(worst, slot[best]);
-            }
-            return new Reading(text.toString(), text.length() == 0 ? 0f : worst);
+            return decode(slots, sharpness());
         }
     }
 }

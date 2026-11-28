@@ -237,7 +237,11 @@ public class PlateScanActivity extends AppCompatActivity {
     }
 
     /** Cuts the upright rectangle out of the raw picture and turns only that small piece upright. */
-    private Rect lastBox; private long lastBoxAt; private String lastOwn; private long lastOwnAt; private int ownStreak; private volatile boolean straightened;
+    private Rect lastBox; private long lastBoxAt; private volatile boolean straightened, lastVoted;
+    /** One frame's reading, kept for 1.5 s for the moving-vehicle rules (sharpest frame / letter vote). */
+    private static final class Seen { final long at; final PlateTextReader.Reading reading; final Bitmap picture;
+        Seen(long at, PlateTextReader.Reading r, Bitmap p) { this.at = at; reading = r; picture = p; } }
+    private final List<Seen> window = new ArrayList<>(); // used on the frame thread only
 
     private static Bitmap cutUpright(Bitmap raw, Rect upright, int rotation) {
         Rect r = toRaw(upright, rotation, raw.getWidth(), raw.getHeight());
@@ -289,6 +293,7 @@ public class PlateScanActivity extends AppCompatActivity {
         }
         finderMs = (System.nanoTime() - t0) / 1_000_000;
         boolean boxed = band != null;
+        if (!boxed) window.clear(); // no plate in view: the next vehicle starts a new window
         // Our Indian plate reader on the plate box (a few ms). A sure reading of a valid plate is taken at once.
         PlateTextReader ours = boxed ? PlateTextReader.ready() : null;
         if (ours != null) {
@@ -318,17 +323,32 @@ public class PlateScanActivity extends AppCompatActivity {
                     }
                 }
                 long took = (System.nanoTime() - tr) / 1_000_000;
-                // Tested on 163 unseen plates, also warped to side angles: one reading at 95%+ is wrong about 1 time in 100,
-                // so it is taken at once. 80-95% is taken when 2 frames in a row read the same plate (a single one is wrong ~6% at side angles).
-                boolean agreed = false;
-                if (plate != null && rd.confidence >= 0.80f) {
-                    ownStreak = plate.equals(lastOwn) && System.currentTimeMillis() - lastOwnAt < 1500 ? ownStreak + 1 : 1;
-                    lastOwn = plate; lastOwnAt = System.currentTimeMillis();
-                    agreed = ownStreak >= 2;
+                // Moving vehicles (3.13): the readings of the last 1.5 s are kept. Taken: the sharpest frame's reading if it is
+                // 95%+ sure, else the letter-by-letter vote of the frames at least half as sharp as the sharpest (2+ frames) if 85%+ sure.
+                // Tested on the 163 test plates with motion blur (training/scripts/vote_sim.py): filled in 71% of plates
+                // with 2 wrong, against 56% with 2 wrong when one frame decides.
+                long now = System.currentTimeMillis();
+                window.removeIf(x -> now - x.at > 1500);
+                window.add(new Seen(now, rd, band));
+                if (window.size() > 4) window.remove(0);
+                Seen sharpest = window.get(0);
+                for (Seen x : window) if (x.reading.sharpness > sharpest.reading.sharpness) sharpest = x;
+                String got = null; Bitmap from = band; boolean voted = false;
+                String p1 = PlateRules.directFromLines(java.util.Collections.singletonList(sharpest.reading.text));
+                if (p1 != null && sharpest.reading.confidence >= 0.95f) { got = p1; from = sharpest.picture; }
+                else {
+                    List<PlateTextReader.Reading> use = new ArrayList<>();
+                    for (Seen x : window) if (x.reading.sharpness >= 0.5f * sharpest.reading.sharpness) use.add(x.reading);
+                    if (use.size() >= 2) {
+                        PlateTextReader.Reading v = PlateTextReader.vote(use);
+                        String p2 = PlateRules.directFromLines(java.util.Collections.singletonList(v.text));
+                        if (p2 != null && v.confidence >= 0.85f) { got = p2; from = sharpest.picture; voted = true; }
+                    }
                 }
-                if (plate != null && (rd.confidence >= 0.95f || agreed)) {
-                    final Bitmap seen = band; final String got = plate; final boolean wasTurned = turned;
-                    main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; straightened = wasTurned; lastPicture = seen; finishWith(got, new ArrayList<>(), null); } });
+                if (got != null) {
+                    window.clear(); lastVoted = voted;
+                    final Bitmap seen = from; final boolean wasTurned = turned; final String plateGot = got;
+                    main.post(() -> { if (!finished) { readerMs = took; lastBoxed = true; ownReader = true; straightened = wasTurned; lastPicture = seen; finishWith(plateGot, new ArrayList<>(), null); } });
                     return;
                 }
             } catch (Throwable ignored) { /* ML Kit below */ }
@@ -427,7 +447,7 @@ public class PlateScanActivity extends AppCompatActivity {
         PlateFinder f = PlateFinder.ready();
         String took = shownAt > 0 ? String.format(java.util.Locale.ROOT, "%.1f s", (System.currentTimeMillis() - shownAt) / 1000f) : "";
         float fps = shownAt > 0 ? framesSeen * 1000f / Math.max(1, System.currentTimeMillis() - shownAt) : 0;
-        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? (straightened ? "Indian reader (straightened) " : "Indian reader ") : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
+        status.setText("Got it" + (took.isEmpty() ? "" : " in " + took) + String.format(java.util.Locale.ROOT, " · %.0f frames/s", fps) + (lastBoxed && f != null ? " · plate box " + finderMs + " ms (" + f.engine + ") + " + (ownReader ? "Indian reader" + (straightened ? " (straightened)" : "") + (lastVoted ? " (frames voted)" : "") + " " : "read ") + readerMs + " ms" : " · read " + readerMs + " ms"));
         main.postDelayed(this::finish, 500); // long enough to see the plate and the timing line // a short "got it" moment, then back to the form
     }
 
