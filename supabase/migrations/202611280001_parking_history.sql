@@ -3,8 +3,8 @@
 -- so the app keeps working unchanged and nothing it trims from the state row is ever lost.
 --  * parking_events   : append-only log; each row carries a SHA-256 fingerprint chained to the row before,
 --                       and update/delete are refused, so any later change would be detectable.
---  * parking_tickets  : one row per ticket, latest version (+ frozen receipt).
---  * parking_payments : one row per payment.
+--  * parking_ticket_history  : one row per ticket, latest version (+ frozen receipt).
+--  * parking_payment_history : one row per payment.
 --  * parking_backups  : a full copy of the state every night (kept 30 days), see the cron job at the end.
 
 create table if not exists public.parking_events (
@@ -24,7 +24,7 @@ create table if not exists public.parking_events (
 create index if not exists parking_events_ticket on public.parking_events (ticket_id);
 create index if not exists parking_events_at on public.parking_events (at);
 
-create table if not exists public.parking_tickets (
+create table if not exists public.parking_ticket_history (
   id text primary key,
   token text not null,
   plate text not null,
@@ -43,10 +43,10 @@ create table if not exists public.parking_tickets (
   first_seen timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists parking_tickets_plate on public.parking_tickets (plate);
-create index if not exists parking_tickets_entry on public.parking_tickets (entry_at);
+create index if not exists parking_ticket_history_plate on public.parking_ticket_history (plate);
+create index if not exists parking_ticket_history_entry on public.parking_ticket_history (entry_at);
 
-create table if not exists public.parking_payments (
+create table if not exists public.parking_payment_history (
   id text primary key,
   ticket_id text not null,
   amount_paise bigint not null,
@@ -58,8 +58,8 @@ create table if not exists public.parking_payments (
   actor text,
   data jsonb not null
 );
-create index if not exists parking_payments_ticket on public.parking_payments (ticket_id);
-create index if not exists parking_payments_at on public.parking_payments (at);
+create index if not exists parking_payment_history_ticket on public.parking_payment_history (ticket_id);
+create index if not exists parking_payment_history_at on public.parking_payment_history (at);
 
 create table if not exists public.parking_backups (
   day date primary key,
@@ -70,8 +70,8 @@ create table if not exists public.parking_backups (
 
 -- Only the server (service role) touches these tables.
 alter table public.parking_events enable row level security;
-alter table public.parking_tickets enable row level security;
-alter table public.parking_payments enable row level security;
+alter table public.parking_ticket_history enable row level security;
+alter table public.parking_payment_history enable row level security;
 alter table public.parking_backups enable row level security;
 
 -- The log cannot be edited or deleted, by anyone.
@@ -109,7 +109,7 @@ begin
   end loop;
 
   for t in select value from jsonb_array_elements(coalesce(state->'tickets', '[]'::jsonb)) loop
-    insert into parking_tickets as x (id, token, plate, category, status, entry_at, entry_gate, entry_by, exit_at, exit_gate, exit_by, total_paise, rev, receipt, data)
+    insert into parking_ticket_history as x (id, token, plate, category, status, entry_at, entry_gate, entry_by, exit_at, exit_gate, exit_by, total_paise, rev, receipt, data)
     values (t->>'id', t->>'token', t->>'plate', t->>'category', t->>'status',
             to_timestamp((t->>'entryAt')::bigint / 1000.0), t->>'entryGate', t->>'entryBy',
             case when t ? 'exitAt' then to_timestamp((t->>'exitAt')::bigint / 1000.0) end, t->>'exitGate', t->>'exitBy',
@@ -123,7 +123,7 @@ begin
   end loop;
 
   for p in select value from jsonb_array_elements(coalesce(state->'payments', '[]'::jsonb)) loop
-    insert into parking_payments (id, ticket_id, amount_paise, method, kind, receipt_no, provider_payment_id, at, actor, data)
+    insert into parking_payment_history (id, ticket_id, amount_paise, method, kind, receipt_no, provider_payment_id, at, actor, data)
     values (p->>'id', p->>'ticketId', (p->>'amountPaise')::bigint, p->>'method', p->>'kind', p->>'receiptNo',
             p->>'providerPaymentId', to_timestamp((p->>'at')::bigint / 1000.0), p->>'by', p)
     on conflict (id) do nothing;

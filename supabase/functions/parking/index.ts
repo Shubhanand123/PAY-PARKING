@@ -929,7 +929,7 @@ Deno.serve(async request => {
       const live = db.tickets.filter(liveMatch)
       try {
         const filter = action === 'vehicleHistory' ? 'plate=eq.' + encodeURIComponent(plateQ) : 'or=(plate.like.*' + plateQ + '*,id.like.*' + q + '*)'
-        const rows = await database<Array<{ data: parking.Ticket }>>('parking_tickets?select=data&order=entry_at.desc&limit=200&' + filter)
+        const rows = await database<Array<{ data: parking.Ticket }>>('parking_ticket_history?select=data&order=entry_at.desc&limit=200&' + filter)
         const byId = new Map(rows.map(r => [r.data.id, r.data]))
         for (const t of live) byId.set(t.id, t) // the live copy is the newest
         return reply({ result: [...byId.values()].sort((a, b) => b.entryAt - a.entryAt).slice(0, 200), source: 'history' })
