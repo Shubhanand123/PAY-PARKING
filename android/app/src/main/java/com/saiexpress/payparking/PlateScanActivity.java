@@ -120,9 +120,10 @@ public class PlateScanActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         boolean readsQr = getIntent().getBooleanExtra(EXTRA_QR, false);
-        PlateFinder.loadInBackground(this); // only when scanning: the app itself never depends on it
-        PlateTextReader.loadInBackground(this);
-        PlateCorners.loadInBackground(this);
+        // Only when scanning, one model after the other (never all at once): if one crashes on this POS,
+        // only that one is switched off next time and the others still load.
+        final android.content.Context app = getApplicationContext();
+        new Thread(() -> { PlateTextReader.get(app); PlateFinder.get(app); PlateCorners.get(app); }, "plate-models-load").start();
         text = textReader();
         if (readsQr) qr = qrReader();
 
