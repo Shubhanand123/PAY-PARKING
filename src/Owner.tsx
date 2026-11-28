@@ -11,12 +11,19 @@ import { Slip, StatusPill } from './Gate'
 import { readTicketQuery } from './numbers'
 import { saveStart, saveEnd } from './done'
 import { Customers, FreeVehicles, OfflineChecks, TicketPaper } from './OwnerExtras'
+import { Complaints, ComplaintsCard, DayClosing, Reports, VehicleVisits } from './OwnerCare'
+import { historyTickets } from './care-api'
 
-type Tab = 'overview' | 'tickets' | 'customers' | 'free' | 'audit' | 'rates' | 'settings' | 'devices'
+type Tab = 'overview' | 'tickets' | 'customers' | 'complaints' | 'closing' | 'reports' | 'free' | 'audit' | 'rates' | 'settings' | 'devices'
 
 export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
-  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['free', 'Free vehicles', 'check'], ['audit', 'Activity log', 'list'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
+  const [complaint, setComplaint] = useState<string>()
+  const [ticketQ, setTicketQ] = useState<string>()
+  const openComplaint = (id?: string) => { setComplaint(id); setTab('complaints') }
+  const openTicket = (id: string) => { setTicketQ(id); setTab('tickets') }
+  const openCount = (db.complaints ?? []).filter(c => c.status === 'new' || c.status === 'open').length
+  const tabs: [Tab, string, string][] = [['overview', 'Overview', 'chart'], ['tickets', 'Tickets', 'list'], ['customers', 'Customers', 'car'], ['complaints', openCount ? `Complaints · ${openCount}` : 'Complaints', 'warn'], ['closing', 'Day closing', 'cash'], ['reports', 'Reports', 'dl'], ['free', 'Free vehicles', 'check'], ['audit', 'Activity log', 'list'], ['rates', 'Rates', 'rupee'], ['settings', 'Settings', 'gear']]
   if (apiEnabled) tabs.push(['devices', 'POS devices', 'key'])
   return (
     <div className="owner">
@@ -24,8 +31,11 @@ export function Owner({ db, me, toast }: { db: DB; me: Staff; toast: (m: string,
         {tabs.map(([k, l, i]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)} aria-current={tab === k}><Ico n={i} size={18} />{l}</button>)}
       </nav>
       <div className="owner-panel">
-      {tab === 'overview' && <><OfflineChecks db={db} /><Overview db={db} live={<LiveActivity db={db} onAll={() => setTab('audit')} />} /></>}
-      {tab === 'tickets' && <Tickets db={db} me={me} toast={toast} />}
+      {tab === 'overview' && <><OfflineChecks db={db} /><ComplaintsCard db={db} onOpen={openComplaint} /><Overview db={db} live={<LiveActivity db={db} onAll={() => setTab('audit')} />} /></>}
+      {tab === 'tickets' && <Tickets key={ticketQ} db={db} me={me} toast={toast} initialQ={ticketQ} />}
+      {tab === 'complaints' && <Complaints db={db} toast={toast} openId={complaint} onTicket={openTicket} />}
+      {tab === 'closing' && <DayClosing db={db} me={me} toast={toast} />}
+      {tab === 'reports' && <Reports db={db} toast={toast} />}
       {tab === 'customers' && <Customers db={db} me={me} toast={toast} />}
       {tab === 'free' && <FreeVehicles db={db} me={me} toast={toast} />}
       {tab === 'audit' && <AuditLog db={db} />}
@@ -195,14 +205,20 @@ function Empty({ text }: { text: string }) {
 }
 
 // ---------- tickets ----------
-function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void }) {
-  const [q, setQ] = useState('')
+function Tickets({ db, me, toast, initialQ }: { db: DB; me: Staff; toast: (m: string, bad?: boolean) => void; initialQ?: string }) {
+  const [q, setQ] = useState(initialQ ?? '')
+  const [older, setOlder] = useState<{ q: string; list: Ticket[] }>()
+  const [extra, setExtra] = useState<Ticket>() // a ticket found only in the permanent history
   const [st, setSt] = useState<'all' | Ticket['status']>('all')
   const [open, setOpen] = useState<string | null>(null)
   const exact = q ? findTicketBySlip(db.tickets, q) : undefined // full SKC number, short number ("142") or old T- number
   const tq = q ? readTicketQuery(q) : undefined
   const list = db.tickets.filter(t => (st === 'all' || t.status === st) && (!q || t === exact || t.plate.includes(q.toUpperCase().replace(/[^A-Z0-9]/g, '')) || t.id.includes(q.toUpperCase()))).slice().reverse()
-  const sel = open ? db.tickets.find(t => t.id === open) : undefined
+  const sel = open ? db.tickets.find(t => t.id === open) ?? (extra?.id === open ? extra : undefined) : undefined
+  useEffect(() => { if (initialQ) { const t = findTicketBySlip(db.tickets, initialQ); if (t) setOpen(t.id) } }, [initialQ]) // eslint-disable-line react-hooks/exhaustive-deps
+  const searchAll = async () => {
+    try { setOlder({ q, list: (await historyTickets('searchHistory', q, db)).filter(t => !list.some(x => x.id === t.id)) }) } catch (e) { toast((e as Error).message, true) }
+  }
   return (
     <div className="stack">
       <div className="card toolbar">
@@ -223,6 +239,11 @@ function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?
             </tr>))}</tbody>
         </table>
         {!list.length && <Empty text="No tickets match." />}
+        {q.trim().length >= 2 && <p className="tiny muted center">{older?.q === q
+          ? older.list.length ? `${older.list.length} more in the permanent history:` : 'Nothing more in the permanent history.'
+          : <button className="link" onClick={() => void searchAll()}>Search the permanent history too</button>}</p>}
+        {older?.q === q && older.list.length > 0 && <table className="tbl"><tbody>{older.list.map(t => <tr key={t.id} onClick={() => { setExtra(t); setOpen(t.id) }}>
+          <td className="num">{t.id}</td><td>{prettyPlate(t.plate)}</td><td>{fmtDT(t.entryAt)}</td><td className="r num">{t.totalPaise != null ? rupees(t.totalPaise) : ''}</td><td>{t.status}</td></tr>)}</tbody></table>}
       </div>
       {sel && <TicketDetail db={db} t={sel} me={me} toast={toast} />}
     </div>
@@ -232,7 +253,9 @@ function Tickets({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, bad?
 /** One ticket: the slip exactly as printed, the frozen receipt, and everything that happened to it. */
 function TicketDetail({ db, t, me, toast }: { db: DB; t: Ticket; me: Staff; toast: (m: string, bad?: boolean) => void }) {
   const paid = t.status === 'paid' || t.status === 'exited'
-  const [view, setView] = useState<'slip' | 'receipt' | 'history'>(paid ? 'receipt' : 'slip')
+  const [view, setView] = useState<'slip' | 'receipt' | 'history' | 'vehicle'>(paid ? 'receipt' : 'slip')
+  const [other, setOther] = useState<Ticket>()
+  useEffect(() => setOther(undefined), [t.id])
   const [server, setServer] = useState<HistoryEvent[] | null>(null)
   useEffect(() => {
     setServer(null)
@@ -250,7 +273,10 @@ function TicketDetail({ db, t, me, toast }: { db: DB; t: Ticket; me: Staff; toas
         <button className={view === 'slip' ? 'on' : ''} onClick={() => setView('slip')}>Entry slip</button>
         <button className={view === 'receipt' ? 'on' : ''} onClick={() => setView('receipt')} disabled={!paid}>Receipt</button>
         <button className={view === 'history' ? 'on' : ''} onClick={() => setView('history')}>History · {events.length}</button>
+        <button className={view === 'vehicle' ? 'on' : ''} onClick={() => setView('vehicle')}>All visits</button>
       </div>
+      {view === 'vehicle' && (other ? <div className="stack"><button className="link" onClick={() => setOther(undefined)}>‹ All visits of {prettyPlate(t.plate)}</button><TicketDetail db={db} t={other} me={me} toast={toast} /></div>
+        : <VehicleVisits db={db} plate={t.plate} onOpen={x => x.id !== t.id && setOther(x)} />)}
       {view === 'slip' && <div className="paper"><Slip db={db} t={t} /><p className="tiny muted center">Exact slip as printed · printed {t.prints}×{t.prints > 1 ? ` (${t.prints - 1} reprint${t.prints > 2 ? 's' : ''})` : ''}</p></div>}
       {view === 'receipt' && paid && <TicketPaper db={db} t={t} me={me} toast={toast} />}
       {view === 'history' && <div className="history">
@@ -281,9 +307,10 @@ const KIND: Record<AuditKind, [string, 'ok' | 'warn' | 'bad' | 'info' | 'mute']>
   plate_fix: ['Plate fixed', 'warn'], payment: ['Payment', 'ok'], exit: ['Exit', 'ok'], cancel: ['Cancel', 'bad'], tariff: ['Rates', 'warn'],
   settings: ['Settings', 'warn'], duplicate_blocked: ['Duplicate blocked', 'warn'], login: ['Login', 'mute'],
   receipt_print: ['Receipt', 'mute'], receipt_reprint: ['Receipt reprint', 'warn'], free_vehicle: ['Free list', 'warn'],
+  cash_close: ['Day closed', 'ok'], complaint: ['Complaint', 'warn'], feedback: ['Rating', 'info'], report: ['Report', 'mute'],
 }
 const ago = (t: number, now: number) => { const m = Math.round((now - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 24 * 60 ? `${Math.floor(m / 60)} h ago` : fmtDT(t) }
-const KIND_ICON: Partial<Record<AuditKind, string>> = { entry: 'car', exit: 'out', payment: 'cash', cancel: 'x', print: 'print', reprint: 'print', receipt_print: 'print', receipt_reprint: 'print', tariff: 'rupee', settings: 'gear', free_vehicle: 'check', lookup_plate: 'search', lookup_qr: 'qr', duplicate_blocked: 'warn', plate_fix: 'scan', login: 'key' }
+const KIND_ICON: Partial<Record<AuditKind, string>> = { entry: 'car', exit: 'out', payment: 'cash', cancel: 'x', print: 'print', reprint: 'print', receipt_print: 'print', receipt_reprint: 'print', tariff: 'rupee', settings: 'gear', free_vehicle: 'check', lookup_plate: 'search', lookup_qr: 'qr', duplicate_blocked: 'warn', plate_fix: 'scan', login: 'key', cash_close: 'cash', complaint: 'warn', feedback: 'check', report: 'dl' }
 function AuditRow({ a, now }: { a: DB['audit'][number]; now?: number }) {
   const [l, tone] = KIND[a.kind]
   return <div className={'arow tone-' + tone}>
@@ -434,6 +461,14 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
           <span className="tiny muted">{!s.gstin ? 'Optional. Printed on every slip and receipt.' : gstOk ? 'Printed on every slip and receipt.' : 'A GSTIN has 15 characters, e.g. 30ABCDE1234F1Z5.'}</span>
         </label>
       </div>
+      <div className="card">
+        <h2>Grievance officer</h2>
+        <p className="muted small">Shown on the privacy policy, the parking terms and the complaint form, as the Digital Personal Data Protection Act 2023 asks. <a className="link" href="#/privacy" target="_blank">See the privacy page</a></p>
+        <div className="grid2">
+          {(['grievanceName', 'grievancePhone', 'grievanceEmail'] as const).map(k => <label key={k} className="setf"><span className="lbl">{k === 'grievanceName' ? 'Name' : k === 'grievancePhone' ? 'Phone' : 'Email'}</span>
+            <input className="field small-field" type={k === 'grievanceEmail' ? 'email' : k === 'grievancePhone' ? 'tel' : 'text'} maxLength={120} value={s[k] ?? ''} onChange={e => setS({ ...s, [k]: e.target.value })} /></label>)}
+        </div>
+      </div>
       <div className="card stack">
         <label className="toggle"><input type="checkbox" checked={s.capacity > 0} onChange={e => setS({ ...s, capacity: e.target.checked ? (db.settings.capacity || 100) : 0 })} /><span className="tg-ui" /><span><b>Track number of parking spaces</b><br /><span className="muted small">Off: the dashboard shows only how many vehicles are inside, with no total or % full.</span></span></label>
         {s.capacity > 0 && f('capacity', 'Total spaces', 'number')}
@@ -442,7 +477,8 @@ function SettingsTab({ db, me, toast }: { db: DB; me: Staff; toast: (m: string, 
         setSaving(true)
         saveStart()
         try {
-          await saveSettings(me.id, { ...s, gstin: s.gstin ? s.gstin : undefined })
+          const tidy = (v?: string) => v?.trim() ? v.trim() : undefined
+          await saveSettings(me.id, { ...s, gstin: s.gstin ? s.gstin : undefined, grievanceName: tidy(s.grievanceName), grievancePhone: tidy(s.grievancePhone), grievanceEmail: tidy(s.grievanceEmail) })
           saveEnd(true, 'Saved')
           toast('Parking settings saved')
         } catch (error) {

@@ -29,7 +29,14 @@ function openDirectPos(link: string) {
 
 const isPosLink = (value: string) => /^(?:pos|pair-pos)\//.test(value)
 
+// Public pages (no sign-in): privacy policy, parking terms, report check.
+const PublicPages = lazy(() => import('./Legal').then(m => ({ default: m.PublicPage })))
+const isPublic = (r: string) => r === 'privacy' || r === 'terms' || r === 'verify' || r.startsWith('verify/')
+
 export default function App() {
+  const [r, setR] = useState(route())
+  useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
+  if (isPublic(r)) return <Suspense fallback={<main className="content"><p role="status">Loading…</p></main>}><PublicPages route={r} /></Suspense>
   return !apiEnabled ? <LocalApp /> : openAccess ? <OpenApp /> : <ConnectedApp />
 }
 

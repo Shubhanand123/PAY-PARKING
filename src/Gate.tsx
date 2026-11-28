@@ -1,3 +1,4 @@
+import { CustomerCare } from './CustomerCare'
 import { RazorpayCheckout } from './RazorpayCheckout'
 import { PosPay } from './PosPay'
 import { apiEnabled, callParking, callParkingPayment } from './parking-api'
@@ -668,6 +669,8 @@ export function Customer({ db, token }: { db: DB; token: string }) {
         {t.status === 'cancelled' && <p className="cp-note">This ticket was cancelled. Ask the attendant if this is a mistake.</p>}
       </section>
 
+      <CustomerCare db={db} t={t} token={token} />
+
       <section className="cp-card">
         <h2 className="cp-h">Parking charges <small>{cat?.name}</small></h2>
         <div className="cp-rates">
@@ -685,6 +688,7 @@ export function Customer({ db, token }: { db: DB; token: string }) {
         <span>{s.siteName}{s.address ? ' · ' + s.address : ''}</span>
         {s.phone && <a href={'tel:' + s.phone.replace(/[^\d+]/g, '')}>Call {s.phone}</a>}
         {s.gstin && <span>GSTIN {s.gstin}</span>}
+        <span className="cp-legal"><a href="#/privacy">Privacy policy</a> · <a href="#/terms">Parking terms</a></span>
       </footer>
     </div>
   )

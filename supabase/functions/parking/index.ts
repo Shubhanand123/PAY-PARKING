@@ -7,6 +7,9 @@ import { loginAlias, pairedPassword } from '../../../src/parking-identity.ts'
 import * as parking from '../../../src/engine.ts'
 import { anyTicketId } from '../../../src/numbers.ts'
 import { applyOp, offlineTicketId, type OfflineOp } from '../../../src/offline-sync.ts'
+import { closeCash } from '../../../src/closing.ts'
+import * as care from '../../../src/complaints.ts'
+import { buildReport, issueReport, REPORTS, sha256, toCsv, validDay, verifyReport, type ReportType } from '../../../src/reports.ts'
 
 const endpoint = Deno.env.get('SUPABASE_URL')!
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -177,16 +180,26 @@ const actions = {
   saveSettings: { roles: ['owner'], fn: parking.saveSettings, checks: ['settings'] },
   addFreeVehicle: { roles: ['owner'], fn: parking.addFreeVehicle, checks: ['text', 'text', 'optionalText'] },
   removeFreeVehicle: { roles: ['owner'], fn: parking.removeFreeVehicle, checks: ['text'] },
+  closeCash: { roles: ['owner'], fn: closeCash, checks: ['integer', 'count', 'optionalText'] },
+  replyComplaint: { roles: ['owner'], fn: care.replyComplaint, checks: ['text', 'longText', 'optionalBool'] },
+  noteComplaint: { roles: ['owner'], fn: care.noteComplaint, checks: ['text', 'longText'] },
+  setComplaintStatus: { roles: ['owner'], fn: care.setComplaintStatus, checks: ['text', 'text'] },
 }
 
 const isInteger = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 100000000
 const isText = (value: unknown) => typeof value === 'string' && value.length <= 500
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 
+const settingsRequired = ['siteName', 'operator', 'address', 'phone', 'payAtEntry', 'cancelNeedsReason', 'capacity']
+const settingsOptional = ['gstin', 'siteCode', 'grievanceName', 'grievancePhone', 'grievanceEmail']
+
 function valid(kind: string, value: unknown, db: parking.DB): boolean {
   switch (kind) {
     case 'text': return isText(value)
     case 'optionalText': return value == null || isText(value)
+    case 'longText': return typeof value === 'string' && value.length <= 2000
+    case 'optionalBool': return value == null || typeof value === 'boolean'
+    case 'count': return isObject(value) && isObject(value.notes) && Object.keys(value).length === 2 && isInteger(value.coinsPaise)
     case 'integer': return isInteger(value)
     case 'optionalInteger': return value == null || isInteger(value)
     case 'lookup': return value === 'plate' || value === 'qr' || value === 'search'
@@ -197,8 +210,10 @@ function valid(kind: string, value: unknown, db: parking.DB): boolean {
         && ['firstPaise', 'perHourPaise', 'capPaise'].every(k => isInteger(rate[k]))
     })
     case 'settings':
-      return isObject(value) && (Object.keys(value).length === 7 || (Object.keys(value).length === 8 && 'gstin' in value))
+      return isObject(value) && settingsRequired.every(k => k in value) && Object.keys(value).every(k => settingsRequired.includes(k) || settingsOptional.includes(k))
         && ['siteName', 'operator', 'address', 'phone'].every(k => isText(value[k]))
+        && ['grievanceName', 'grievancePhone', 'grievanceEmail'].every(k => value[k] === undefined || (typeof value[k] === 'string' && (value[k] as string).length <= 120))
+        && (value.siteCode === undefined || (typeof value.siteCode === 'string' && /^[A-Z]{2}\d$/.test(value.siteCode)))
         && Boolean(String(value.siteName).trim() && String(value.operator).trim())
         && isInteger(value.capacity) // 0 = number of spaces not tracked
         && (value.gstin === undefined || (typeof value.gstin === 'string' && /^([0-9]{2}[A-Z0-9]{13})?$/.test(value.gstin)))
@@ -237,8 +252,11 @@ async function state() {
   return created
 }
 
+// Complaints (names, mobiles), ratings, issued reports and cash closes are for the Owner only: never sent to the gates.
 function publishState(current: State, role: string) {
-  const { offlineSeen: _seen, ...db } = current.db
+  const { offlineSeen: _seen, ...all } = current.db
+  const { complaints: _c, ratings: _r, reports: _p, cashCloses: _k, ...gate } = all
+  const db = role === 'owner' ? all : gate
   return { ...current, role, db: { ...db, razorpayEnabled: Boolean(razorpay), razorpayTest: Boolean(razorpay?.keyId.startsWith('rzp_test_')) } as parking.DB }
 }
 
@@ -547,18 +565,57 @@ async function razorpayWebhook(request: Request, raw: string, body: Record<strin
   return reply({ ok: true, status: result.status })
 }
 
+/** The ticket page: only this ticket, its payments and rate, the customer's own complaints (no internal notes). */
+function customerView(db: parking.DB, ticket: parking.Ticket) {
+  const { plate, entryBy, exitBy, cancelledBy, cancelReason, ...safeTicket } = ticket
+  const { offlineSeen: _a, offlineIssues: _b, freeVehicles: _c, cashCloses: _d, reports: _e, complaints: _f, ratings: _g, cseq: _h, ...rest } = db
+  return {
+    ...rest, razorpayEnabled: Boolean(razorpay), seq: 0, rseq: 0,
+    tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }],
+    payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })),
+    tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [],
+    complaints: care.customerComplaints(db, ticket) as unknown as care.Complaint[],
+    ratings: (db.ratings ?? []).filter(r => r.ticketId === ticket.id),
+  }
+}
+function publicInfo(s: parking.Settings) {
+  return { operator: s.operator, siteName: s.siteName, address: s.address, phone: s.phone, gstin: s.gstin, grievanceName: s.grievanceName, grievancePhone: s.grievancePhone, grievanceEmail: s.grievanceEmail }
+}
+async function removePhotos(paths: string[]) {
+  if (!paths.length) return
+  await fetch(endpoint + '/storage/v1/object/complaints', {
+    method: 'DELETE', headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefixes: paths }),
+  }).catch(() => {})
+}
+/** Daily: close quiet resolved complaints, delete complaints 180 days after closing (with their photos). */
+let lastComplaintTidy = 0
+async function tidyComplaints() {
+  if (Date.now() - lastComplaintTidy < 6 * 3600_000) return
+  lastComplaintTidy = Date.now()
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { db, version } = await state()
+    const { changed, photos } = care.tidyComplaints(db)
+    if (!changed) return
+    if (await saveState(db, version)) { await removePhotos(photos); return }
+  }
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
   if (request.method !== 'POST') return reply({ error: 'Method not allowed.' }, 405)
   try {
     const raw = await request.text()
-    if (raw.length > 16000) return reply({ error: 'Request is too large.' }, 413)
+    // Only a complaint with photos may be big (3 photos of at most ~300 KB each).
+    if (raw.length > 1_300_000) return reply({ error: 'Request is too large.' }, 413)
     const body = JSON.parse(raw)
+    if (raw.length > 16000 && body?.action !== 'customerComplaint') return reply({ error: 'Request is too large.' }, 413)
     const subroute = new URL(request.url).pathname.split('/').at(-1)
     // Keep-awake ping (a scheduled job calls this every few minutes so the first payment is not slow).
     if (body?.action === 'ping') {
       await reconcileUpi().catch(error => console.error('UPI reconcile failed: ' + error))
       await cleanOldScans().catch(error => console.error('Scan clean-up failed: ' + error))
+      await tidyComplaints().catch(error => console.error('Complaint clean-up failed: ' + error))
       return reply({ ok: true })
     }
     // Razorpay webhook: Razorpay tells us the moment a QR is paid, so the gate turns Paid without waiting for a poll.
@@ -577,9 +634,62 @@ Deno.serve(async request => {
       const [current] = await read()
       const ticket = current?.db.tickets.find(item => item.token === args[0])
       if (!ticket) return reply({ error: 'Ticket not found.' }, 404)
-      const db = current.db
-      const { plate, entryBy, exitBy, cancelledBy, cancelReason, ...safeTicket } = ticket
-      return reply({ db: { ...db, razorpayEnabled: Boolean(razorpay), seq: 0, tickets: [{ ...safeTicket, plate: '••••' + plate.slice(-4) }], payments: db.payments.filter(payment => payment.ticketId === ticket.id).map(payment => ({ ...payment, by: '' })), tariffs: db.tariffs.filter(tariff => tariff.id === ticket.tariffId), audit: [], staff: [] } })
+      return reply({ db: customerView(current.db, ticket) })
+    }
+    // Ticket page (public, the slip's QR token is the key): smiley rating, complaint, writing back.
+    if (action === 'customerRate' || action === 'customerComplaint' || action === 'customerMessage') {
+      const token = args[0]
+      if (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token)) return reply({ error: 'Ticket not found.' }, 404)
+      if (action === 'customerRate' && !(isInteger(args[1]) && (args[2] == null || isText(args[2])))) return reply({ error: 'Choose a smiley.' }, 400)
+      if (action === 'customerMessage' && !(typeof args[1] === 'string' && args[1].length <= 40 && typeof args[2] === 'string' && args[2].length <= 2000)) return reply({ error: 'Write a message.' }, 400)
+      let paths: string[] = []
+      if (action === 'customerComplaint') {
+        const [, input, photos = []] = args
+        if (!isObject(input) || !Array.isArray(photos) || photos.length > care.MAX_PHOTOS) return reply({ error: 'Check the complaint and try again.' }, 400)
+        const pictures: Uint8Array<ArrayBuffer>[] = []
+        for (const image of photos) {
+          if (typeof image !== 'string' || image.length > 420_000 || !/^[A-Za-z0-9+/=]+$/.test(image)) return reply({ error: 'A photo is too large or not a picture.' }, 400)
+          const bytes = Uint8Array.from(atob(image), c => c.charCodeAt(0))
+          if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return reply({ error: 'Photos must be JPEG pictures.' }, 400)
+          pictures.push(bytes)
+        }
+        const { db } = await state()
+        const { t } = care.checkComplaint(db, token, input as unknown as care.ComplaintInput, pictures.length) // refuse before storing anything
+        for (const bytes of pictures) {
+          const path = new Date().toISOString().slice(0, 7) + '/' + t.id + '-' + crypto.randomUUID().slice(0, 8) + '.jpg'
+          const upload = await fetch(endpoint + '/storage/v1/object/complaints/' + path, {
+            method: 'POST', headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'image/jpeg' }, body: bytes,
+          })
+          if (!upload.ok) { await removePhotos(paths); return reply({ error: 'The photos could not be saved. Try again, or send without photos.' }, 502) }
+          paths.push(path)
+        }
+      }
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { db, version } = await state()
+        let result: unknown
+        try {
+          result = action === 'customerRate' ? care.rateVisit(db, token, args[1] as number, args[2] as string | null)
+            : action === 'customerMessage' ? care.customerMessage(db, token, args[1] as string, args[2] as string)
+            : care.addComplaint(db, token, args[1] as unknown as care.ComplaintInput, paths)
+        } catch (error) { await removePhotos(paths); throw error }
+        const saved = await saveState(db, version)
+        if (saved) {
+          const ticket = saved.db.tickets.find(x => x.token === token)!
+          return reply({ result: result ?? true, db: customerView(saved.db, ticket) })
+        }
+      }
+      await removePhotos(paths)
+      return reply({ error: 'Busy. Please try again.' }, 409)
+    }
+    // Public: check a printed report's code; the business details for the privacy and terms pages.
+    if (action === 'verifyReport') {
+      if (typeof args[0] !== 'string' || args[0].length > 20) return reply({ error: 'Enter the check code.' }, 400)
+      const found = verifyReport((await state()).db, args[0])
+      return found ? reply({ result: found }) : reply({ error: 'No report has this check code.' }, 404)
+    }
+    if (action === 'publicInfo') {
+      const { settings } = (await state()).db
+      return reply({ result: publicInfo(settings) })
     }
     if (action === 'redeemOwnerCode') return await redeemOwnerCode(args)
     if (action === 'ownerPinKey') return await ownerPinKey(args)
@@ -773,6 +883,57 @@ Deno.serve(async request => {
       )
       if (!changed.length) return reply({ error: 'This gate device is already inactive or unavailable.' }, 409)
       return reply({ result: true })
+    }
+    if (['ticketHistory', 'vehicleHistory', 'searchHistory', 'issueReport', 'complaintPhoto'].includes(action)) {
+      if (role !== 'owner') return reply({ error: 'Only the Owner can see this.' }, 403)
+      if (action === 'issueReport') {
+        const [type, from, to] = args
+        if (!Object.hasOwn(REPORTS, type as string) || !validDay(from) || !validDay(to)) return reply({ error: 'Choose a report and dates.' }, 400)
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const { db, version } = await state()
+          const report = buildReport(db, type as ReportType, from, to)
+          const issued = issueReport(db, { id: 'owner', name: signedIn?.app_metadata?.parking_label ?? 'Owner', role: 'owner', gate: 'Office' }, type as ReportType, from, to, await sha256(toCsv(report)))
+          const saved = await saveState(db, version)
+          if (saved) return reply({ result: { issued, report }, snapshot: publishState(saved, role) })
+        }
+        return reply({ error: 'Try again.' }, 409)
+      }
+      if (action === 'complaintPhoto') {
+        const [id, index] = args
+        const complaint = typeof id === 'string' ? (await state()).db.complaints?.find(c => c.id === id) : undefined
+        const path = complaint && Number.isInteger(index) ? complaint.photos[index as number] : undefined
+        if (!path) return reply({ error: 'Photo not found.' }, 404)
+        const signed = await fetch(endpoint + '/storage/v1/object/sign/complaints/' + path, {
+          method: 'POST', headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }),
+        })
+        if (!signed.ok) return reply({ error: 'The photo could not be opened.' }, 502)
+        const { signedURL } = await signed.json() as { signedURL: string }
+        return reply({ result: endpoint + '/storage/v1' + signedURL })
+      }
+      // Permanent history tables (migration 202611280001). Until it is applied, answer from the live records.
+      const { db } = await state()
+      if (action === 'ticketHistory') {
+        if (typeof args[0] !== 'string' || !anyTicketId.test(args[0])) return reply({ error: 'Choose a ticket.' }, 400)
+        const local = db.audit.filter(a => a.ticketId === args[0]).map(a => ({ id: a.id, at: a.at, by: a.by, kind: a.kind, text: a.text }))
+        try {
+          const rows = await database<Array<{ event_id: string; at_ms: number; actor: string; kind: string; text: string }>>(
+            'parking_events?select=event_id,at_ms,actor,kind,text&order=seq.asc&limit=1000&ticket_id=eq.' + encodeURIComponent(args[0]))
+          const known = new Set(rows.map(r => r.event_id))
+          return reply({ result: [...rows.map(r => ({ id: r.event_id, at: Number(r.at_ms), by: r.actor, kind: r.kind, text: r.text })), ...local.filter(a => !known.has(a.id))], source: 'history' })
+        } catch { return reply({ result: local, source: 'live' }) }
+      }
+      const q = typeof args[0] === 'string' ? args[0].toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 30) : ''
+      if (q.length < 2) return reply({ error: 'Type at least 2 letters or digits.' }, 400)
+      const plateQ = q.replace(/-/g, '')
+      const liveMatch = (t: parking.Ticket) => action === 'vehicleHistory' ? t.plate === plateQ : t.plate.includes(plateQ) || t.id.includes(q)
+      const live = db.tickets.filter(liveMatch)
+      try {
+        const filter = action === 'vehicleHistory' ? 'plate=eq.' + encodeURIComponent(plateQ) : 'or=(plate.like.*' + plateQ + '*,id.like.*' + q + '*)'
+        const rows = await database<Array<{ data: parking.Ticket }>>('parking_tickets?select=data&order=entry_at.desc&limit=200&' + filter)
+        const byId = new Map(rows.map(r => [r.data.id, r.data]))
+        for (const t of live) byId.set(t.id, t) // the live copy is the newest
+        return reply({ result: [...byId.values()].sort((a, b) => b.entryAt - a.entryAt).slice(0, 200), source: 'history' })
+      } catch { return reply({ result: live.sort((a, b) => b.entryAt - a.entryAt).slice(0, 200), source: 'live' }) }
     }
     if (action === 'posSnapshot') {
       if (!digest || !isGate(role)) return reply({ error: 'This link does not grant POS access.' }, 403)

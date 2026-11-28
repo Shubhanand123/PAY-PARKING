@@ -3,6 +3,9 @@
 // Money is always integer paise. Times are stored as UTC epoch ms and shown in Asia/Kolkata.
 
 import { readTicketQuery, receiptNumber, runningNumber, ticketNumber } from './numbers.ts'
+import type { CashClose } from './closing.ts'
+import type { Complaint, Rating } from './complaints.ts'
+import type { IssuedReport } from './reports.ts'
 
 export type Role = 'attendant' | 'owner'
 export type Staff = { id: string; name: string; role: Role; gate: string }
@@ -27,9 +30,14 @@ export type Settings = {
   capacity: number       // total spaces; 0 = not tracked
   gstin?: string         // GST number, printed on slips and receipts
   siteCode?: string      // site part of SKC ticket numbers, e.g. GA1 (default GA1)
+  grievanceName?: string  // grievance officer (DPDP Act), shown on the privacy page and complaint form
+  grievancePhone?: string
+  grievanceEmail?: string
 }
 export type Status = 'inside' | 'paid' | 'exited' | 'cancelled'
-export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string }
+export type Payment = { id: string; ticketId: string; amountPaise: number; method: 'cash' | 'razorpay'; providerPaymentId?: string; at: number; by: string; kind: 'prepaid' | 'exit'; receiptNo: string
+  closeId?: string  // cash only: the cash close (day closing) that counted it
+}
 export type OnlineCheckout = { orderId: string; amount: number; currency: 'INR'; receipt: string; billedAt: number; totalPaise: number; linkUrl?: string
   upiQr?: string    // Razorpay UPI QR content (upi://pay?...), shown big on the POS
   qrImage?: string  // Razorpay's own QR image, used if upiQr is missing
@@ -72,7 +80,7 @@ export type Receipt = {
   payments: { method: Payment['method']; kind: Payment['kind']; amountPaise: number; receiptNo: string; phone?: boolean; at?: number }[]
   free?: FreeExit
 }
-export type AuditKind = 'entry' | 'print' | 'reprint' | 'receipt_print' | 'receipt_reprint' | 'free_vehicle' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login'
+export type AuditKind = 'entry' | 'print' | 'reprint' | 'receipt_print' | 'receipt_reprint' | 'free_vehicle' | 'lookup_plate' | 'lookup_qr' | 'plate_fix' | 'payment' | 'exit' | 'cancel' | 'tariff' | 'settings' | 'duplicate_blocked' | 'login' | 'cash_close' | 'complaint' | 'feedback' | 'report'
 export type Audit = { id: string; at: number; by: string; kind: AuditKind; ticketId?: string; text: string; amountPaise?: number }
 
 export type DB = {
@@ -91,6 +99,11 @@ export type DB = {
   offlineIssues?: { at: number; opId: string; ticketId: string; device?: string; text: string; resolved?: boolean }[]  // offline work the Owner should check
   offlineSeen?: string[]   // op ids already recorded (latest 3000)
   gateLock?: boolean       // Owner: gates work only on approved POS machines
+  cashCloses?: CashClose[] // day closing: cash counted against what the records expect (src/closing.ts)
+  complaints?: Complaint[] // customer complaints (src/complaints.ts). Owner only: never sent to the gates.
+  cseq?: number            // last complaint running number
+  ratings?: Rating[]       // smiley ratings from the customer page, one per ticket
+  reports?: IssuedReport[] // reports printed with a check code (src/reports.ts), for the public verify page
 }
 
 const KEY = 'parking-demo-v1'
@@ -221,7 +234,7 @@ export function billFor(db: DB, t: Ticket, at: number): Bill {
 }
 
 // ---------- storage ----------
-const uid = () => Math.random().toString(36).slice(2, 10)
+export const uid = () => Math.random().toString(36).slice(2, 10)
 function token() {
   const b = new Uint8Array(16); crypto.getRandomValues(b)
   return Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
@@ -361,7 +374,7 @@ export function runAction<A extends unknown[], R>(db: DB, staffId: string, actio
   return action(db, staff, ...args)
 }
 
-const log = (db: DB, s: Staff, kind: AuditKind, text: string, ticketId?: string, amountPaise?: number) =>
+export const log = (db: DB, s: Staff, kind: AuditKind, text: string, ticketId?: string, amountPaise?: number) =>
   db.audit.push({ id: uid(), at: Date.now(), by: s.name, kind, text, ticketId, amountPaise })
 
 export const findActiveByPlate = (db: DB, plate: string) => db.tickets.find(t => t.plate === normPlate(plate) && (t.status === 'inside' || t.status === 'paid'))
