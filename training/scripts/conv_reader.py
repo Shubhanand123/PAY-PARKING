@@ -4,5 +4,5 @@ import keras, tensorflow as tf
 m=keras.models.load_model('/home/user/PAY-PARKING/training/models/reader_v4.keras', compile=False)
 x=keras.Input((64,128,3), batch_size=1, dtype='uint8'); y=m(keras.ops.cast(x,'float32'))
 w=keras.Model(x, y[0] if isinstance(y,(list,tuple)) else y)
-c=tf.lite.TFLiteConverter.from_keras_model(w); c.optimizations=[tf.lite.Optimize.DEFAULT]
+c=tf.lite.TFLiteConverter.from_keras_model(w); pass  # float32: compressed (dynamic-range) ops need a newer TFLite runtime than the app has
 open('plate_reader.tflite','wb').write(c.convert()); print('size', os.path.getsize('plate_reader.tflite'))

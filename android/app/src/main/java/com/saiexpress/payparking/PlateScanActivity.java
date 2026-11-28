@@ -295,7 +295,7 @@ public class PlateScanActivity extends AppCompatActivity {
         if (finder != null) {
             try {
                 // The finder runs on every 2nd frame; between, the last box (under 0.2 s old) is reused, grown a bit more.
-                boolean reuse = false; // 3.21: with ML Kit text off, the finder runs on every frame (the plate is found sooner)
+                boolean reuse = (framesSeen % 2 == 0) && lastBox != null && System.currentTimeMillis() - lastBoxAt < 1200; // the finder takes 0.4-0.7 s on the POS: every 2nd frame reuses its box
                 Rect box = reuse ? lastBox : finder.find(raw, rotation);
                 if (!reuse) { lastBox = box; lastBoxAt = System.currentTimeMillis(); }
                 if (box != null && !reuse) focusOnPlate(box, rotation, raw.getWidth(), raw.getHeight());
